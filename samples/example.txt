@@ -1,0 +1,5 @@
+示例分组一,#genre#
+示例频道一,https://example.com/live/a.m3u8,https://example.com/live/a-backup.m3u8
+示例频道二,https://example.com/live/b.m3u8
+示例分组二,#genre#
+示例频道三,https://example.com/live/c.m3u8

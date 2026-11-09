@@ -1,0 +1,13 @@
+#EXTM3U x-tvg-url="https://example.com/epg.xml"
+#EXTINF:-1 tvg-id="demo1" tvg-name="示例频道一" tvg-logo="https://example.com/logo1.png" group-title="示例分组",示例频道一
+#EXTVLCOPT:http-user-agent=Mozilla/5.0
+#EXTVLCOPT:http-referrer=https://example.com/
+https://example.com/live/demo1.m3u8
+#EXTINF:-1 tvg-name="示例频道二" group-title="示例分组",示例频道二
+https://example.com/live/demo2.m3u8
+#EXTINF:-1 tvg-name="双源频道" group-title="多源演示",双源频道
+https://example.com/live/demo3-a.m3u8
+#EXTINF:-1 tvg-name="双源频道" group-title="多源演示",双源频道
+https://example.com/live/demo3-b.m3u8
+#EXTINF:-1 tvg-name="带Header的频道" group-title="多源演示",带Header的频道
+https://example.com/live/demo4.m3u8|User-Agent=Mozilla%2F5.0&Referer=https%3A%2F%2Fexample.com%2F
