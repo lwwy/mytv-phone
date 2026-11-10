@@ -142,11 +142,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setLockLandscape(v: Boolean) = viewModelScope.launch { prefs.setLockLandscape(v) }
 
-    fun showImportSheet() {
+    fun openImport() {
         _showImport.value = true
     }
 
-    fun hideImportSheet() {
+    /** 关闭导入页：同时清掉外部分享残留，避免下次打开被旧内容覆盖。 */
+    fun closeImport() {
         _showImport.value = false
         _externalText.value = null
     }

@@ -87,7 +87,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             item { SectionHeader("直播源") }
 
             item {
-                TextButton(onClick = { vm.showImportSheet() }) {
+                TextButton(onClick = { vm.openImport() }) {
                     Icon(Icons.Default.Add, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("导入新源")

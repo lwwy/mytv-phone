@@ -55,8 +55,8 @@ fun AppNav(vm: MainViewModel) {
     val activity = context as? Activity
     val darkTheme = isSystemInDarkTheme()
     val settings by vm.settings.collectAsStateWithLifecycle()
-    // 导入面板挂在导航顶层（而非某个子页面）：这样无论在列表页还是横屏播放页，
-    // 从外部「分享 / 打开」文件进来都能正常弹出 ImportSheet
+    // 导入页挂在导航顶层（而非某个子页面）：这样无论在列表页还是横屏播放页，
+    // 从外部「分享 / 打开」文件进来都能正常弹出 ImportScreen
     val showImport by vm.showImport.collectAsStateWithLifecycle()
     val external by vm.externalText.collectAsStateWithLifecycle()
     val route = nav.currentBackStackEntryAsState().value?.destination?.route
@@ -128,10 +128,10 @@ fun AppNav(vm: MainViewModel) {
                 .navigationBarsPadding(),
         )
         if (showImport) {
-            ImportSheet(
+            ImportScreen(
                 vm = vm,
                 initial = external,
-                onDismiss = { vm.hideImportSheet() },
+                onDismiss = { vm.closeImport() },
             )
         }
     }
