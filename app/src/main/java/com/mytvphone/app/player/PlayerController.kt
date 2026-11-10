@@ -202,6 +202,11 @@ class PlayerController(context: Context) {
         player.playWhenReady = !player.playWhenReady
     }
 
+    /** 离开播放页时先静音、保留最后一帧，让退出转场期间画面保持静止。 */
+    fun pause() {
+        player.playWhenReady = false
+    }
+
     fun pauseForLifecycle() {
         playingBeforeBackground = player.playWhenReady
         player.playWhenReady = false

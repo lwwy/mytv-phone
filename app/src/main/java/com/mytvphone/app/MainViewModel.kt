@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -82,7 +84,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         showToast("已导入 ${result.channels.size} 个频道 / ${result.groups.size} 个分组")
     }
 
-    /** 网络订阅刷新：失败时保留上一次成功的频道列表。 */
+    /** 网络订阅刷新：失败时保留上一次成功的频道列表。解析整体放入 IO，不卡主线程。 */
     fun refreshSubscription(id: String) = viewModelScope.launch {
         val sub = repo.get(id) ?: return@launch
         val url = sub.url ?: run {
@@ -90,19 +92,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return@launch
         }
         showToast("正在更新订阅…")
-        repo.fetch(url)
-            .onSuccess { bytes ->
-                val result = PlaylistParser.parse(PlaylistParser.decodeAuto(bytes))
-                if (result.isEmpty) {
-                    showToast("更新失败：未解析到频道，已保留原列表")
-                } else {
-                    repo.replaceChannels(id, result.channels)
-                    showToast("已更新为 ${result.channels.size} 个频道")
-                }
-            }
-            .onFailure { e ->
-                showToast("更新失败：${e.message}，已保留原列表")
-            }
+        val bytes = repo.fetch(url)
+        if (bytes.isFailure) {
+            showToast("更新失败：${bytes.exceptionOrNull()?.message}，已保留原列表")
+            return@launch
+        }
+        // fetch 内部虽在 IO，但 onSuccess 会从 withContext 切回主线程，
+        // 所以这里显式再切到 IO 做解码 + 解析，避免大列表阻塞主线程
+        val result = withContext(Dispatchers.IO) {
+            PlaylistParser.parse(PlaylistParser.decodeAuto(bytes.getOrThrow()))
+        }
+        if (result.isEmpty) {
+            showToast("更新失败：未解析到频道，已保留原列表")
+        } else {
+            repo.replaceChannels(id, result.channels)
+            showToast("已更新为 ${result.channels.size} 个频道")
+        }
     }
 
     fun deleteSubscription(id: String) {
@@ -135,10 +140,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val cur = list.indexOfFirst { it.name == st.channelName && it.group == st.group }
         val next = if (cur < 0) 0 else (cur + delta + list.size) % list.size
         playChannel(list[next])
-    }
-
-    fun toggleFavorite(ch: Channel) = viewModelScope.launch {
-        prefs.toggleFavorite(ch.id)
     }
 
     fun setLockLandscape(v: Boolean) = viewModelScope.launch { prefs.setLockLandscape(v) }

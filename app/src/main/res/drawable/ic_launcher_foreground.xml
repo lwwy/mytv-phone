@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  纯蓝底 + 白色电视图标。
-  使用 adaptive icon 的 108dp 画布：中心 72dp 为安全区，图形集中在 26~82 范围内，
-  避免被各厂商启动器的圆形 / 圆角遮罩裁掉天线与屏幕边角。
+  纯蓝底（#256EDD）+ 白色圆角实心播放三角。
+  使用 adaptive icon 的 108dp 画布：
+   - 三角形宽约 44 / 高 54，约占画布 41% / 50%，与参考截图比例一致
+   - 左边缘垂直 x=36，尖端朝右 x≈80，垂直居中 y=54，整体略右移做视觉居中补偿
+   - 三个顶点均用二次贝塞尔做圆角（右尖最明显），实心填充
+   - 图形完全落在中心 66dp 安全区内，不会被圆形 / 圆角遮罩裁切
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -10,33 +13,13 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- 天线：两根白色圆头短线 -->
-    <path
-        android:pathData="M43,38 L36,27"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="5.2"
-        android:strokeLineCap="round" />
-    <path
-        android:pathData="M65,38 L72,27"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="5.2"
-        android:strokeLineCap="round" />
-
-    <!-- 电视机身：白色圆角矩形描边 -->
-    <path
-        android:pathData="M32,38 L76,38 A6,6 0 0,1 82,44 L82,66 A6,6 0 0,1 76,72 L32,72 A6,6 0 0,1 26,66 L26,44 A6,6 0 0,1 32,38 Z"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="6"
-        android:strokeLineJoin="round"
-        android:fillColor="#00000000" />
-
-    <!-- 屏幕内的字母 T -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M35,46 L55,46 L55,51 L48,51 L48,64 L42,64 L42,51 L35,51 Z" />
-
-    <!-- 屏幕内的字母 V -->
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M50,46 L56,46 L62,61 L68,46 L74,46 L65,64 L59,64 Z" />
+        android:pathData="M36,32
+            Q36,27 40,29
+            L75,48
+            Q85,54 75,60
+            L40,79
+            Q36,81 36,76
+            Z" />
 </vector>

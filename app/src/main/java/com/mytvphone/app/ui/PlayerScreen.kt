@@ -2,9 +2,16 @@ package com.mytvphone.app.ui
 
 import android.app.Activity
 import android.content.Context
-import android.content.pm.ActivityInfo
 import android.media.AudioManager
+import android.view.LayoutInflater
+import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -46,14 +53,21 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.mytvphone.app.MainViewModel
+import com.mytvphone.app.R
 import kotlinx.coroutines.delay
 import kotlin.math.abs
+
+/**
+ * 页面内各层的淡入淡出节奏统一短于 NavHost 的页面转场：
+ * 退出时先于页面转场收干净，避免两层动画叠加造成的「闪一下」。
+ */
+private val UiFadeIn = fadeIn(tween(180, easing = FastOutSlowInEasing))
+private val UiFadeOut = fadeOut(tween(130, easing = FastOutLinearInEasing))
+private val HintFadeIn = fadeIn(tween(110))
+private val HintFadeOut = fadeOut(tween(180, delayMillis = 60))
 
 /**
  * 横屏全屏播放页。
@@ -61,6 +75,10 @@ import kotlin.math.abs
  *  - 全屏任意位置上下滑换台
  *  - 左右滑：左半屏调亮度、右半屏调音量
  *  - 返回键 / 全面屏手势返回由 BackHandler 统一接住
+ *
+ * 系统栏显隐、状态栏图标明暗、屏幕方向**全部由 AppNav 按路由在首帧统一处理**。
+ * 这里绝不再写 window / requestedOrientation：旧实现放在 onDispose 里，要等退出动画
+ * 放完才恢复，还会与 AppNav 双重写入互相覆盖，正是返回设置页「先闪一下再跳一下」的根因。
  */
 @Composable
 fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
@@ -70,38 +88,31 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
     val settings by vm.settings.collectAsStateWithLifecycle()
 
     var showControls by remember { mutableStateOf(true) }
-    var overlay by remember { mutableStateOf<String?>(null) }
+    var overlayText by remember { mutableStateOf("") }
+    var overlayVisible by remember { mutableStateOf(false) }
+    var lastError by remember { mutableStateOf("") }
 
     val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val scrim = MaterialTheme.colorScheme.scrim
+    val err = st.error
 
-    // 只在此页面强制横屏 + 沉浸式；离开时恢复系统栏与方向
-    DisposableEffect(settings.lockLandscape) {
-        val prevOrientation = activity?.requestedOrientation
-            ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        activity?.requestedOrientation = if (settings.lockLandscape) {
-            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        } else {
-            ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
-        // 全局已 enableEdgeToEdge()，这里只隐藏系统栏，不再改 decorFits（离开时避免破坏边缘布局）
-        activity?.window?.let { w ->
-            WindowCompat.getInsetsController(w, w.decorView)
-                .hide(WindowInsetsCompat.Type.systemBars())
-        }
-        onDispose {
-            activity?.window?.let { w ->
-                WindowCompat.getInsetsController(w, w.decorView)
-                    .show(WindowInsetsCompat.Type.systemBars())
-            }
-            activity?.requestedOrientation = prevOrientation
-        }
-    }
-
-    // 离开播放页就停止播放，避免退回列表后还有声音
+    // 转场动画结束后才 dispose，此时再彻底停止播放
     DisposableEffect(Unit) {
         onDispose { vm.controller.stop() }
     }
+
+    // 退出前先静音并保留最后一帧：淡出期间画面不再变化，过渡更连贯
+    fun leave() {
+        vm.controller.pause()
+        onBack()
+    }
+
+    fun showOverlay(msg: String) {
+        overlayText = msg
+        overlayVisible = true
+    }
+
+    LaunchedEffect(err) { if (err != null) lastError = err }
 
     LaunchedEffect(showControls) {
         if (showControls) {
@@ -110,15 +121,15 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         }
     }
 
-    LaunchedEffect(overlay) {
-        if (overlay != null) {
+    LaunchedEffect(overlayText, overlayVisible) {
+        if (overlayVisible) {
             delay(1200)
-            overlay = null
+            overlayVisible = false
         }
     }
 
     BackHandler {
-        if (showControls) showControls = false else onBack()
+        if (showControls) showControls = false else leave()
     }
 
     val tapModifier = Modifier.pointerInput(Unit) {
@@ -157,14 +168,14 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                                 val next = (cur + delta).coerceIn(0.02f, 1f)
                                 lp.screenBrightness = next
                                 w.attributes = lp
-                                overlay = "亮度 ${(next * 100).toInt()}%"
+                                showOverlay("亮度 ${(next * 100).toInt()}%")
                             }
                         } else {
                             val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                             val cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
                             val next = (cur + delta * max * 1.5f).toInt().coerceIn(0, max)
                             audio.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0)
-                            overlay = "音量 ${(next * 100 / max.coerceAtLeast(1))}%"
+                            showOverlay("音量 ${(next * 100 / max.coerceAtLeast(1))}%")
                         }
                     }
                 },
@@ -188,97 +199,121 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
             .then(tapModifier)
             .then(dragModifier),
     ) {
+        // TextureView（见 res/layout/player_view.xml）：普通 View 才能参与 Compose 的
+        // alpha 淡出。默认 SurfaceView 是独立窗口层，退出时视频会硬切一下造成闪屏。
         AndroidView(
             factory = { ctx ->
-                PlayerView(ctx).apply {
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    player = vm.controller.player
-                    layoutParams = android.widget.FrameLayout.LayoutParams(
-                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                        android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                    )
-                }
+                val view = LayoutInflater.from(ctx)
+                    .inflate(R.layout.player_view, null, false) as PlayerView
+                view.player = vm.controller.player
+                view.layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                )
+                view
             },
             modifier = Modifier.fillMaxSize(),
         )
 
-        if (st.buffering && st.error == null) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+        AnimatedVisibility(
+            visible = st.buffering && err == null,
+            enter = UiFadeIn,
+            exit = UiFadeOut,
+            modifier = Modifier.align(Alignment.Center),
+        ) {
+            CircularProgressIndicator()
         }
 
-        if (st.error == null && !st.buffering && showControls) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.TopStart)
-                    .background(scrim.copy(alpha = 0.6f))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回列表", tint = Color.White)
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = st.channelTitle.ifEmpty { st.channelName },
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                    )
-                    Text(
-                        text = st.group + (st.info?.let { " · $it" } ?: ""),
-                        color = Color.White.copy(alpha = 0.75f),
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier.align(Alignment.Center),
-                horizontalArrangement = Arrangement.spacedBy(28.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PlayerControlIcon(Icons.Default.SkipPrevious, "上一个频道", 38.dp) { vm.prevChannel() }
-                PlayerControlIcon(
-                    if (st.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    "播放/暂停",
-                    48.dp,
-                ) { vm.controller.togglePlayPause() }
-                PlayerControlIcon(Icons.Default.SkipNext, "下一个频道", 38.dp) { vm.nextChannel() }
-            }
-
-            if (st.urlCount > 1) {
+        AnimatedVisibility(
+            visible = showControls && err == null,
+            enter = UiFadeIn,
+            exit = UiFadeOut,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Box(Modifier.fillMaxSize()) {
                 Row(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .align(Alignment.TopStart)
                         .background(scrim.copy(alpha = 0.6f))
-                        .padding(8.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("备用源：", color = Color.White, style = MaterialTheme.typography.bodySmall)
-                    for (i in 0 until st.urlCount) {
-                        TextButton(onClick = { vm.controller.selectUrl(i) }) {
-                            Text(
-                                "${i + 1}",
-                                color = if (i == st.urlIndex) {
-                                    MaterialTheme.colorScheme.inversePrimary
-                                } else {
-                                    Color.White
-                                },
-                            )
+                    IconButton(onClick = { leave() }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回列表",
+                            tint = Color.White,
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = st.channelTitle.ifEmpty { st.channelName },
+                            color = Color.White,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                        )
+                        Text(
+                            text = st.group + (st.info?.let { " · $it" } ?: ""),
+                            color = Color.White.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalArrangement = Arrangement.spacedBy(28.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PlayerControlIcon(Icons.Default.SkipPrevious, "上一个频道", 38.dp) {
+                        vm.prevChannel()
+                    }
+                    PlayerControlIcon(
+                        if (st.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        "播放/暂停",
+                        48.dp,
+                    ) { vm.controller.togglePlayPause() }
+                    PlayerControlIcon(Icons.Default.SkipNext, "下一个频道", 38.dp) {
+                        vm.nextChannel()
+                    }
+                }
+
+                if (st.urlCount > 1) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .background(scrim.copy(alpha = 0.6f))
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("备用源：", color = Color.White, style = MaterialTheme.typography.bodySmall)
+                        for (i in 0 until st.urlCount) {
+                            TextButton(onClick = { vm.controller.selectUrl(i) }) {
+                                Text(
+                                    "${i + 1}",
+                                    color = if (i == st.urlIndex) {
+                                        MaterialTheme.colorScheme.inversePrimary
+                                    } else {
+                                        Color.White
+                                    },
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        st.error?.let { err ->
+        AnimatedVisibility(
+            visible = err != null,
+            enter = UiFadeIn,
+            exit = UiFadeOut,
+            modifier = Modifier.align(Alignment.Center),
+        ) {
             Card(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(28.dp),
+                modifier = Modifier.padding(28.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 ),
@@ -288,7 +323,8 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text("播放失败", style = MaterialTheme.typography.titleMedium)
-                    Text(err, style = MaterialTheme.typography.bodyMedium)
+                    // err 为空时（退出动画进行中）显示最后一次错误，保证淡出完整
+                    Text(err ?: lastError, style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(onClick = { vm.controller.retry() }) { Text("重试") }
                         FilledTonalButton(onClick = { vm.nextChannel() }) { Text("下一个频道") }
@@ -297,13 +333,17 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
             }
         }
 
-        overlay?.let { msg ->
+        AnimatedVisibility(
+            visible = overlayVisible,
+            enter = HintFadeIn,
+            exit = HintFadeOut,
+            modifier = Modifier.align(Alignment.Center),
+        ) {
             Text(
-                text = msg,
+                text = overlayText,
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier
-                    .align(Alignment.Center)
                     .background(scrim.copy(alpha = 0.72f), MaterialTheme.shapes.small)
                     .padding(horizontal = 20.dp, vertical = 10.dp),
             )

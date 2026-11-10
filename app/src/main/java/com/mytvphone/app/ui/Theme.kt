@@ -1,23 +1,20 @@
 package com.mytvphone.app.ui
 
-import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
 
 /**
- * 品牌蓝取自参考图标 #276FDC，把饱和度从 0.82 降到约 0.5、略提明度，
- * 得到更轻量、更现代的一套蓝。浅色 / 深色均按 Material 3 语义色角色铺开。
+ * Material 3 浅 / 深双色板，跟随系统。
+ *
+ * 状态栏图标明暗与系统栏显隐统一由 AppNav 按当前路由写入 window，
+ * 这里不再使用 SideEffect 重复设置——两处写同一个 window 会互相覆盖，
+ * 在播放页进出时造成状态栏颜色闪烁。
  */
-val BrandBlue = Color(0xFF5B8AC8)
-
 private val LightColors = lightColorScheme(
     primary = Color(0xFF3E6FA8),
     onPrimary = Color.White,
@@ -95,15 +92,6 @@ fun MyTvPhoneTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as? Activity)?.window ?: return@SideEffect
-            val controller = WindowCompat.getInsetsController(window, view)
-            controller.isAppearanceLightStatusBars = !darkTheme
-            controller.isAppearanceLightNavigationBars = !darkTheme
-        }
-    }
     MaterialTheme(
         colorScheme = if (darkTheme) DarkColors else LightColors,
         typography = Typography(),

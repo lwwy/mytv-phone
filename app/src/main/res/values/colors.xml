@@ -2,6 +2,6 @@
 <resources>
     <!-- 启动瞬间的窗口背景，与 Compose 的 surface 对齐，避免亮/暗闪屏 -->
     <color name="app_background">#FFF7F9FC</color>
-    <!-- 图标底色：参考图 #276FDC 降饱和、提明度后的柔和蓝 -->
-    <color name="ic_launcher_background">#FF5B8AC8</color>
+    <!-- 图标底色：取自参考截图「网页电视」图标，精确采样 #256EDD（明亮饱和蓝） -->
+    <color name="ic_launcher_background">#FF256EDD</color>
 </resources>

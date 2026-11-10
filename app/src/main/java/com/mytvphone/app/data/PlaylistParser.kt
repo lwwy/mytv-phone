@@ -15,7 +15,7 @@ import java.util.LinkedHashMap
  * 直播源解析器。
  *
  * 支持四类输入：
- *  1. M3U / M3U8（#EXTM3U / #EXTINF，含 tvg-name / group-title / tvg-logo / x-tvg-url）
+ *  1. M3U / M3U8（#EXTM3U / #EXTINF，含 tvg-name / group-title / tvg-logo）
  *  2. TXT（"分组名,#genre#" + "频道名,url1,url2"）
  *  3. JSON（List<TV>，兼容 my-tv-0 导出的频道列表）
  *  4. Gua64 六十四卦编码（兼容 my-tv-0 的 channels.txt），解出明文后按上面三类继续解析
@@ -45,7 +45,6 @@ object PlaylistParser {
     private val idRe = Regex("tvg-id=\"([^\"]*)\"")
     private val logoRe = Regex("tvg-logo=\"([^\"]*)\"")
     private val groupRe = Regex("group-title=\"([^\"]*)\"")
-    private val epgRe = Regex("x-tvg-url=\"([^\"]*)\"")
     private val jsonKvRe = Regex("\"([^\"]+)\"\\s*:\\s*\"([^\"]*)\"")
     private val urlRe = Regex("^(https?|rtsp|rtmp|rtp|udp)://\\S+$", RegexOption.IGNORE_CASE)
 
@@ -139,7 +138,6 @@ object PlaylistParser {
     private fun parseM3u(text: String): ParseResult {
         val merged = LinkedHashMap<String, Channel>()
         val order = ArrayList<String>()
-        var epg: String? = null
         var skipped = 0
         var pending: Pending? = null
         var extGrp: String? = null
@@ -150,7 +148,7 @@ object PlaylistParser {
 
             when {
                 line.startsWith("#EXTM3U", true) -> {
-                    epgRe.find(line)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let { epg = it }
+                    // 头部标签，当前无需从 x-tvg-url 等扩展字段提取额外信息
                 }
 
                 line.startsWith("#EXTINF", true) -> {
@@ -221,7 +219,6 @@ object PlaylistParser {
             format = "M3U",
             channels = channels,
             groups = channels.map { it.group }.distinct(),
-            epgUrl = epg,
             skipped = skipped,
         )
     }
@@ -285,7 +282,8 @@ object PlaylistParser {
     private fun parseJson(text: String): ParseResult {
         return try {
             val arr = JsonParser.parseString(text).asJsonArray
-            val list = ArrayList<Channel>()
+            val merged = LinkedHashMap<String, Channel>()
+            val order = ArrayList<String>()
             for (el in arr) {
                 if (!el.isJsonObject) continue
                 val o = el.asJsonObject
@@ -305,8 +303,11 @@ object PlaylistParser {
                     if (e.value.isJsonPrimitive) headers[e.key] = e.value.asString
                 }
                 if (urls.isEmpty()) continue
-                list.add(
-                    Channel(
+                // 与 parseM3u 一致：同名同分组合并，避免产生重复 id 导致列表崩溃
+                val key = group + "\u0000" + name
+                val existing = merged[key]
+                if (existing == null) {
+                    merged[key] = Channel(
                         id = makeId(group, name),
                         name = name,
                         title = str("title").takeIf { it.isNotEmpty() } ?: name,
@@ -315,12 +316,20 @@ object PlaylistParser {
                         urls = urls.distinct(),
                         headers = headers,
                     )
-                )
+                    order.add(key)
+                } else {
+                    merged[key] = existing.copy(
+                        urls = (existing.urls + urls).distinct(),
+                        headers = existing.headers + headers,
+                        logo = existing.logo.ifEmpty { logo },
+                    )
+                }
             }
+            val channels = order.mapNotNull { merged[it] }
             ParseResult(
                 format = "JSON",
-                channels = list,
-                groups = list.map { it.group }.distinct(),
+                channels = channels,
+                groups = channels.map { it.group }.distinct(),
             )
         } catch (e: Exception) {
             ParseResult(format = "JSON 解析失败")

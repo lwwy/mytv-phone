@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  播放页专用 PlayerView 布局。
+
+  这里必须用 XML 而不是 new PlayerView(ctx)：surface_type 只在构造时从 AttributeSet 读取，
+  没有公开的 setter。默认 surface_view 是独立窗口层（打洞合成），Compose 的 alpha / 淡出
+  转场对它无效——退出播放页时视频画面会「硬切」一下，正是闪屏的来源之一。
+  改成 texture_view 后它只是普通 View，能参与 NavHost 的 fade-through 与整个页面的透明度动画。
+-->
+<androidx.media3.ui.PlayerView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/player_view"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    app:use_controller="false"
+    app:resize_mode="fit"
+    app:surface_type="texture_view"
+    app:shutter_background_color="#FF000000" />

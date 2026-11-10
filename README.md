@@ -10,9 +10,9 @@
 |---|---|
 | 导入直播源 | ① 本地文件（SAF）② 粘贴文本 ③ 网络订阅 URL ④ 从其他 App「分享 / 用其他应用打开」 |
 | 支持格式 | M3U / M3U8、TXT(`#genre#`)、JSON（兼容 my-tv-0 的 `List<TV>`）、Gua64 六十四卦编码（兼容其 `channels.txt`）、无头纯文本 |
-| 解析增强 | `tvg-name` / `tvg-id` / `tvg-logo` / `group-title` / `x-tvg-url`；`#EXTVLCOPT` / `#KODIPROP` / `#EXTHTTP` 与 `url|Referer=...` 提取 UA/Referer；UTF-8 ↔ GBK 自动识别；同名频道多源合并且保持顺序 |
+| 解析增强 | `tvg-name` / `tvg-id` / `tvg-logo` / `group-title`；`#EXTVLCOPT` / `#KODIPROP` / `#EXTHTTP` 与 `url|Referer=...` 提取 UA/Referer；UTF-8 ↔ GBK 自动识别；同名频道多源合并且保持顺序 |
 | 播放 | AndroidX Media3 (ExoPlayer) 1.4.0，HLS / DASH / RTSP / Progressive；Live 目标延迟 12 秒；失败时自动按解码方式重试 → 自动切换备用源 → 中文错误提示 |
-| 手机交互 | 竖屏搜索 / 分组 / 收藏；横屏单击显隐控件、双击暂停、上下滑换台、左半屏调亮度、右半屏调音量；返回键与全面屏手势统一处理 |
+| 手机交互 | 竖屏点击频道直接播放、按分组切换列表；横屏单击显隐控件、双击暂停、上下滑换台、左半屏调亮度、右半屏调音量；返回键与全面屏手势统一处理 |
 | 订阅管理 | 多份订阅并存、切换、重命名、删除、网络订阅一键刷新（失败保留上次结果）、配置备份导出/恢复 |
 | 其他 | 不锁死方向、跟随系统语言、沉浸式仅作用于横屏播放页、无需任何存储权限、`usesCleartextTraffic` 支持 http 源 |
 
@@ -111,7 +111,7 @@ app/src/main/java/com/mytvphone/app/
 ## 已知限制（P2 可选）
 
 - 未内置 ffmpeg 软解扩展，极少数冷门编码依赖设备硬解
-- 未实现 EPG 节目单（解析时会提取 `x-tvg-url` 但目前仅展示）、画中画、投屏
+- 未实现 EPG 节目单、画中画、投屏
 - 未实现订阅定时自动刷新，需手动点「刷新」
 - 未做真机兼容性验证；本项目为自用工具，按需自行调整
 

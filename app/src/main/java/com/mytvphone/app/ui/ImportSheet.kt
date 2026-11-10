@@ -4,6 +4,15 @@ package com.mytvphone.app.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -63,6 +72,9 @@ import kotlinx.coroutines.withContext
  * 交互采用显式状态机 [ImportStep]：点任一入口会**整页切换**到对应表单，
  * 而不是把输入框追加到长列表末尾——后者在半展开的 BottomSheet 里会落在可视区外，
  * 表现为「点了没反应」。同时 sheet 默认全展开，输入框固定在标题正下方。
+ *
+ * 页面之间用 fade-through 切换、高度由 SizeTransform 平滑过渡；
+ * 关闭时先播完 sheet 的收起动画再从组合树移除，避免「瞬间消失」的硬切。
  */
 private enum class ImportStep { Choose, Paste, Url, Preview }
 
@@ -84,17 +96,32 @@ fun ImportSheet(
     var preview by remember { mutableStateOf<ParseResult?>(null) }
     var pendingSource by rememberSaveable { mutableStateOf("") }
     var pendingUrl by rememberSaveable { mutableStateOf<String?>(null) }
-    var busy by rememberSaveable { mutableStateOf(false) }
+    // 普通 remember：不跨进程持久化。否则解析途中进程被回收、恢复后会残留 busy=true，
+    // 导入面板永远卡在「处理中…」且按钮禁用，无法继续操作
+    var busy by remember { mutableStateOf(false) }
     var errorMsg by rememberSaveable { mutableStateOf<String?>(null) }
+    // 退出动画进行中 errorMsg 已置空，记住最后一条让淡出完整
+    var lastErrorMsg by rememberSaveable { mutableStateOf("") }
 
-    // 外部分享只在首次进入时处理一次；不再与「当前页」互相覆盖
+    LaunchedEffect(errorMsg) { errorMsg?.let { lastErrorMsg = it } }
+
+    /** 先播完 sheet 的收起动画再移除组合；vm.hideImportSheet() 幂等，重复调用无害。 */
+    fun closeSheet() {
+        scope.launch {
+            sheetState.hide()
+            onDismiss()
+        }
+    }
+
+    // 外部分享只在首次进入时处理一次；不再与「当前页」互相覆盖。
+    // 解析是纯 CPU 操作，放进 IO 协程，避免大列表卡主线程。
     LaunchedEffect(Unit) {
         if (initial != null) {
             name = initial.first.substringBeforeLast('.')
             pastedText = initial.second
             pendingSource = "外部分享 / 打开方式"
             pendingUrl = null
-            val r = PlaylistParser.parse(initial.second)
+            val r = withContext(Dispatchers.IO) { PlaylistParser.parse(initial.second) }
             if (r.isEmpty) {
                 errorMsg = "未解析到可用频道（识别格式：${r.format}）"
                 step = ImportStep.Paste
@@ -113,28 +140,32 @@ fun ImportSheet(
         scope.launch {
             busy = true
             errorMsg = null
-            val text = withContext(Dispatchers.IO) {
-                runCatching {
+            val result = withContext(Dispatchers.IO) {
+                val text = runCatching {
                     context.contentResolver.openInputStream(uri)?.use {
                         PlaylistParser.decodeAuto(it.readBytes())
                     }
                 }.getOrNull()
+                if (text.isNullOrBlank()) {
+                    null
+                } else {
+                    PlaylistParser.parse(text)
+                }
             }
             busy = false
-            if (text.isNullOrBlank()) {
+            if (result == null) {
                 errorMsg = "读取文件失败或文件为空"
+                return@launch
+            }
+            if (result.isEmpty) {
+                errorMsg = "未解析到可用频道（识别格式：${result.format}）"
                 return@launch
             }
             val display = resolveDisplayName(context, uri) ?: "本地文件"
             name = display.substringBeforeLast('.')
-            val r = PlaylistParser.parse(text)
-            if (r.isEmpty) {
-                errorMsg = "未解析到可用频道（识别格式：${r.format}）"
-                return@launch
-            }
             pendingSource = "本地文件：$display"
             pendingUrl = null
-            preview = r
+            preview = result
             step = ImportStep.Preview
         }
     }
@@ -150,120 +181,142 @@ fun ImportSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            when (step) {
-                ImportStep.Choose -> ChoosePage(
-                    busy = busy,
-                    onFile = {
-                        errorMsg = null
-                        openDoc.launch(arrayOf("*/*"))
-                    },
-                    onPaste = { errorMsg = null; step = ImportStep.Paste },
-                    onUrl = { errorMsg = null; step = ImportStep.Url },
-                )
-
-                ImportStep.Paste -> InputPage(
-                    title = "粘贴文本",
-                    hint = "把 M3U 内容或「频道名,地址」粘贴到这里",
-                    text = pastedText,
-                    onTextChange = { pastedText = it },
-                    multiline = true,
-                    actionLabel = "解析并预览",
-                    busy = busy,
-                    onBack = ::backToChoose,
-                    onAction = {
-                        val r = PlaylistParser.parse(pastedText)
-                        if (r.isEmpty) {
-                            errorMsg = "未解析到可用频道（识别格式：${r.format}）"
-                        } else {
+        // AnimatedContent 的 content 只有一个根 Column：既能让页面内元素纵向排列，
+        // 又能让整页（含高度）参与淡入淡出，切换时不再生硬跳变。
+        AnimatedContent(
+            targetState = step,
+            transitionSpec = {
+                fadeIn(tween(210, delayMillis = 50, easing = FastOutSlowInEasing))
+                    .togetherWith(fadeOut(tween(110, easing = FastOutLinearInEasing)))
+                    .using(SizeTransform(clip = false))
+            },
+            label = "ImportStep",
+        ) { target ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                when (target) {
+                    ImportStep.Choose -> ChoosePage(
+                        busy = busy,
+                        onFile = {
                             errorMsg = null
-                            pendingSource = "粘贴导入"
-                            pendingUrl = null
-                            preview = r
-                            step = ImportStep.Preview
-                        }
-                    },
-                )
+                            openDoc.launch(arrayOf("*/*"))
+                        },
+                        onPaste = { errorMsg = null; step = ImportStep.Paste },
+                        onUrl = { errorMsg = null; step = ImportStep.Url },
+                    )
 
-                ImportStep.Url -> InputPage(
-                    title = "网络订阅 URL",
-                    hint = "https://example.com/list.m3u",
-                    text = urlText,
-                    onTextChange = { urlText = it },
-                    multiline = false,
-                    actionLabel = "拉取并预览",
-                    busy = busy,
-                    onBack = ::backToChoose,
-                    onAction = {
-                        val url = urlText.trim()
-                        if (!url.startsWith("http", ignoreCase = true)) {
-                            errorMsg = "请输入以 http/https 开头的地址"
-                        } else {
+                    ImportStep.Paste -> InputPage(
+                        title = "粘贴文本",
+                        hint = "把 M3U 内容或「频道名,地址」粘贴到这里",
+                        text = pastedText,
+                        onTextChange = { pastedText = it },
+                        multiline = true,
+                        actionLabel = "解析并预览",
+                        busy = busy,
+                        onBack = ::backToChoose,
+                        onAction = {
+                            val input = pastedText
+                            // 解析可能处理数 MB 文本，放进 IO 协程，避免阻塞主线程
                             scope.launch {
                                 busy = true
                                 errorMsg = null
-                                val result = vm.repo.fetch(url)
+                                val r = withContext(Dispatchers.IO) { PlaylistParser.parse(input) }
                                 busy = false
-                                result
-                                    .onSuccess { bytes ->
-                                        val r = PlaylistParser.parse(PlaylistParser.decodeAuto(bytes))
-                                        if (r.isEmpty) {
-                                            errorMsg = "未解析到可用频道（识别格式：${r.format}）"
-                                        } else {
-                                            name = name.ifBlank { "网络订阅" }
-                                            pendingSource = "网络订阅"
-                                            pendingUrl = url
-                                            preview = r
-                                            step = ImportStep.Preview
-                                        }
-                                    }
-                                    .onFailure { e -> errorMsg = "拉取失败：${e.message}" }
+                                if (r.isEmpty) {
+                                    errorMsg = "未解析到可用频道（识别格式：${r.format}）"
+                                } else {
+                                    pendingSource = "粘贴导入"
+                                    pendingUrl = null
+                                    preview = r
+                                    step = ImportStep.Preview
+                                }
                             }
-                        }
-                    },
-                )
+                        },
+                    )
 
-                ImportStep.Preview -> {
-                    val r = preview
-                    if (r == null) {
-                        // 极端情况（进程恢复后预览丢失）：不在这里写状态，只给个返回入口
-                        Text("预览已失效，请重新选择导入方式。")
-                        FilledTonalButton(onClick = ::backToChoose) { Text("重新选择") }
-                    } else {
-                        PreviewPage(
-                            name = name,
-                            onNameChange = { name = it },
-                            result = r,
-                            onBack = ::backToChoose,
-                            onConfirm = {
-                                vm.commitImport(name, pendingSource, r, pendingUrl)
-                                onDismiss()
-                            },
-                        )
+                    ImportStep.Url -> InputPage(
+                        title = "网络订阅 URL",
+                        hint = "https://example.com/list.m3u",
+                        text = urlText,
+                        onTextChange = { urlText = it },
+                        multiline = false,
+                        actionLabel = "拉取并预览",
+                        busy = busy,
+                        onBack = ::backToChoose,
+                        onAction = {
+                            val url = urlText.trim()
+                            if (!url.startsWith("http", ignoreCase = true)) {
+                                errorMsg = "请输入以 http/https 开头的地址"
+                            } else {
+                                scope.launch {
+                                    busy = true
+                                    errorMsg = null
+                                    val result = vm.repo.fetch(url)
+                                    busy = false
+                                    result
+                                        .onSuccess { bytes ->
+                                            val r = PlaylistParser.parse(PlaylistParser.decodeAuto(bytes))
+                                            if (r.isEmpty) {
+                                                errorMsg = "未解析到可用频道（识别格式：${r.format}）"
+                                            } else {
+                                                name = name.ifBlank { "网络订阅" }
+                                                pendingSource = "网络订阅"
+                                                pendingUrl = url
+                                                preview = r
+                                                step = ImportStep.Preview
+                                            }
+                                        }
+                                        .onFailure { e -> errorMsg = "拉取失败：${e.message}" }
+                                }
+                            }
+                        },
+                    )
+
+                    ImportStep.Preview -> {
+                        val r = preview
+                        if (r == null) {
+                            // 极端情况（进程恢复后预览丢失）：不在这里写状态，只给个返回入口
+                            Text("预览已失效，请重新选择导入方式。")
+                            FilledTonalButton(onClick = ::backToChoose) { Text("重新选择") }
+                        } else {
+                            PreviewPage(
+                                name = name,
+                                onNameChange = { name = it },
+                                result = r,
+                                onBack = ::backToChoose,
+                                onConfirm = {
+                                    vm.commitImport(name, pendingSource, r, pendingUrl)
+                                    closeSheet()
+                                },
+                            )
+                        }
                     }
                 }
-            }
 
-            errorMsg?.let { msg ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
+                AnimatedVisibility(
+                    visible = errorMsg != null,
+                    enter = fadeIn(tween(150)),
+                    exit = fadeOut(tween(120)),
                 ) {
-                    Text(
-                        text = msg,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.weight(1f),
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = errorMsg ?: lastErrorMsg,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
         }
@@ -430,13 +483,6 @@ private fun PreviewPage(
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.primary,
     )
-    result.epgUrl?.let {
-        Text(
-            "检测到 EPG：$it",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
 
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         result.channels.take(5).forEach { ch ->

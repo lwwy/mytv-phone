@@ -26,7 +26,6 @@ data class ParseResult(
     val format: String = "未知",
     val channels: List<Channel> = emptyList(),
     val groups: List<String> = emptyList(),
-    val epgUrl: String? = null,
     val skipped: Int = 0,
 ) {
     val isEmpty: Boolean get() = channels.isEmpty()

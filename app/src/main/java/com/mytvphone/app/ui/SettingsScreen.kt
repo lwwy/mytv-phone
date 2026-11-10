@@ -1,9 +1,14 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+)
 
 package com.mytvphone.app.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -119,7 +125,9 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         "还没有订阅，点上方「导入新源」添加。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 8.dp),
+                        modifier = Modifier
+                            .animateItem()
+                            .padding(vertical = 8.dp),
                     )
                 }
             }
@@ -131,6 +139,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     onSelect = { vm.setActiveSub(sub.id) },
                     onRefresh = { vm.refreshSubscription(sub.id) },
                     onDelete = { vm.deleteSubscription(sub.id) },
+                    modifier = Modifier.animateItem(),
                 )
             }
 
@@ -153,14 +162,18 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     title = "播放时锁定横屏",
                     desc = "进入播放页自动转横屏，列表页不受影响",
                     checked = settings.lockLandscape,
-                ) { vm.setLockLandscape(it) }
+                    onChange = { vm.setLockLandscape(it) },
+                    modifier = Modifier.animateItem(),
+                )
             }
             item {
                 SwitchRow(
                     title = "滑动手势",
                     desc = "上下滑换台、左半屏调亮度、右半屏调音量",
                     checked = settings.gesturesEnabled,
-                ) { vm.setGestures(it) }
+                    onChange = { vm.setGestures(it) },
+                    modifier = Modifier.animateItem(),
+                )
             }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
@@ -173,7 +186,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     ),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("口袋电视 v1.0.0", style = MaterialTheme.typography.titleSmall)
+                        Text("口袋电视", style = MaterialTheme.typography.titleSmall)
                         Text(
                             "自用播放器，不内置、不分发、不验证任何直播源。播放列表由你自己导入。",
                             style = MaterialTheme.typography.bodySmall,
@@ -183,17 +196,6 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 }
             }
         }
-    }
-
-    // 该页也响应导入请求（例如从设置页点「导入新源」）
-    val showImport by vm.showImport.collectAsStateWithLifecycle()
-    val external by vm.externalText.collectAsStateWithLifecycle()
-    if (showImport) {
-        ImportSheet(
-            vm = vm,
-            initial = external,
-            onDismiss = { vm.hideImportSheet() },
-        )
     }
 }
 
@@ -213,9 +215,33 @@ private fun SwitchRow(
     desc: String,
     checked: Boolean,
     onChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
+    // 开关切换时整行底色与标题色一起平滑过渡，与 Material 3 Switch 自带的滑块
+    // 动画同步，避免「开关动了、界面硬切」的割裂感。
+    val containerColor by animateColorAsState(
+        targetValue = if (checked) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+        } else {
+            Color.Transparent
+        },
+        animationSpec = tween(220),
+        label = "SwitchRowContainer",
+    )
+    val titleColor by animateColorAsState(
+        targetValue = if (checked) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+        animationSpec = tween(220),
+        label = "SwitchRowTitle",
+    )
+
     ListItem(
-        headlineContent = { Text(title, style = MaterialTheme.typography.bodyLarge) },
+        headlineContent = {
+            Text(title, style = MaterialTheme.typography.bodyLarge, color = titleColor)
+        },
         supportingContent = {
             Text(
                 desc,
@@ -224,7 +250,8 @@ private fun SwitchRow(
             )
         },
         trailingContent = { Switch(checked = checked, onCheckedChange = onChange) },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        colors = ListItemDefaults.colors(containerColor = containerColor),
+        modifier = modifier.clip(MaterialTheme.shapes.medium),
     )
 }
 
@@ -235,22 +262,27 @@ private fun SubscriptionCard(
     onSelect: () -> Unit,
     onRefresh: () -> Unit,
     onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val date = remember(sub.importedAt) {
         SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(sub.importedAt))
     }
     var confirmDelete by remember { mutableStateOf(false) }
+    // 切换当前订阅时，两张卡片的底色同时渐变，不再瞬间互换
+    val containerColor by animateColorAsState(
+        targetValue = if (active) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        animationSpec = tween(240),
+        label = "SubscriptionActive",
+    )
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         onClick = onSelect,
-        colors = CardDefaults.cardColors(
-            containerColor = if (active) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerLow
-            },
-        ),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
     ) {
         Row(
             modifier = Modifier

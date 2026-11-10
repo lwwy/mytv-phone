@@ -19,26 +19,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,26 +59,24 @@ fun ChannelListScreen(
     onSettings: () -> Unit,
 ) {
     val channels by vm.channels.collectAsStateWithLifecycle()
-    val settings by vm.settings.collectAsStateWithLifecycle()
-    val subs by vm.repo.subs.collectAsStateWithLifecycle()
-    val showImport by vm.showImport.collectAsStateWithLifecycle()
-    val external by vm.externalText.collectAsStateWithLifecycle()
 
     val activity = LocalContext.current as? Activity
 
-    var query by rememberSaveable { mutableStateOf("") }
-    var favOnly by rememberSaveable { mutableStateOf(false) }
     var selectedGroup by rememberSaveable { mutableStateOf(ALL_GROUP) }
     var lastBack by remember { mutableStateOf(0L) }
 
     val groups = remember(channels) {
         listOf(ALL_GROUP) + channels.map { it.group }.distinct()
     }
-    val filtered = remember(channels, query, favOnly, selectedGroup, settings.favorites) {
-        channels.filter { ch ->
-            (selectedGroup == ALL_GROUP || ch.group == selectedGroup) &&
-                (!favOnly || ch.id in settings.favorites) &&
-                (query.isBlank() || ch.name.contains(query, true) || ch.title.contains(query, true))
+    val filtered = remember(channels, selectedGroup) {
+        channels.filter { selectedGroup == ALL_GROUP || it.group == selectedGroup }
+    }
+
+    // 切换订阅后，旧分组可能已不存在；若当前选中分组不在新分组里就重置为「全部」，
+    // 否则 ch.group != selectedGroup 会把所有频道筛掉，误显示「没有匹配的频道」
+    LaunchedEffect(channels) {
+        if (selectedGroup != ALL_GROUP && channels.none { it.group == selectedGroup }) {
+            selectedGroup = ALL_GROUP
         }
     }
 
@@ -111,61 +102,18 @@ fun ChannelListScreen(
                 },
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { vm.showImportSheet() }) {
-                Icon(Icons.Default.Add, contentDescription = "导入直播源")
-            }
-        },
     ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize(),
         ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                singleLine = true,
-                shape = RoundedCornerShape(28.dp),
-                placeholder = { Text("搜索频道名") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "清空")
-                        }
-                    }
-                },
+            Text(
+                text = "${channels.size} 个频道",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
             )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                FilterChip(
-                    selected = favOnly,
-                    onClick = { favOnly = !favOnly },
-                    label = { Text("只看收藏") },
-                    leadingIcon = {
-                        Icon(
-                            if (favOnly) Icons.Default.Star else Icons.Default.StarBorder,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    },
-                )
-                Text(
-                    text = "${subs.size} 份订阅 · ${channels.size} 个频道",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
 
             if (groups.size > 2) {
                 ScrollableTabRow(
@@ -186,16 +134,12 @@ fun ChannelListScreen(
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = if (channels.isEmpty()) "还没有直播源" else "没有匹配的频道",
+                            text = "还没有直播源",
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Spacer(Modifier.size(8.dp))
                         Text(
-                            text = if (channels.isEmpty()) {
-                                "点右下角 + 导入 M3U / TXT 文件、粘贴文本或网络订阅"
-                            } else {
-                                "换个关键词或分组试试"
-                            },
+                            text = "在右上角「设置」里导入 M3U / TXT 文件、粘贴文本或网络订阅",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -206,31 +150,19 @@ fun ChannelListScreen(
                     items(filtered, key = { it.id }) { ch ->
                         ChannelRow(
                             ch = ch,
-                            fav = ch.id in settings.favorites,
                             onPlay = { onPlay(ch) },
-                            onFav = { vm.toggleFavorite(ch) },
                         )
                     }
                 }
             }
         }
     }
-
-    if (showImport) {
-        ImportSheet(
-            vm = vm,
-            initial = external,
-            onDismiss = { vm.hideImportSheet() },
-        )
-    }
 }
 
 @Composable
 private fun ChannelRow(
     ch: Channel,
-    fav: Boolean,
     onPlay: () -> Unit,
-    onFav: () -> Unit,
 ) {
     ListItem(
         headlineContent = {
@@ -252,19 +184,6 @@ private fun ChannelRow(
         },
         leadingContent = {
             ChannelAvatar(ch = ch)
-        },
-        trailingContent = {
-            IconButton(onClick = onFav) {
-                Icon(
-                    imageVector = if (fav) Icons.Default.Star else Icons.Default.StarBorder,
-                    contentDescription = if (fav) "取消收藏" else "收藏",
-                    tint = if (fav) {
-                        MaterialTheme.colorScheme.tertiary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.clickable(onClick = onPlay),

@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="app_background">#FF0F1318</color>
+    <!-- 夜间模式同样使用品牌蓝，避免启动器图标随深浅主题变色 -->
+    <color name="ic_launcher_background">#FF256EDD</color>
 </resources>
