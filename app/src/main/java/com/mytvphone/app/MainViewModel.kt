@@ -110,9 +110,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * 删除订阅。
+     * 只有删掉的正好是当前订阅时才回退到第一份——否则会把用户正在使用的另一份订阅顶掉。
+     */
     fun deleteSubscription(id: String) {
+        val wasActive = activeSubId() == id
         repo.remove(id)
-        viewModelScope.launch { prefs.setActiveSub(repo.subs.value.firstOrNull()?.id ?: "") }
+        if (wasActive) {
+            viewModelScope.launch { prefs.setActiveSub(repo.subs.value.firstOrNull()?.id ?: "") }
+        }
     }
 
     fun renameSubscription(id: String, name: String) = repo.rename(id, name)
@@ -214,17 +221,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         controller.play(ch)
     }
 
-    fun nextChannel() = step(1)
-
-    fun prevChannel() = step(-1)
-
-    private fun step(delta: Int) {
+    fun nextChannel() {
         val list = _channels.value
         if (list.isEmpty()) return
         val st = controller.state.value
         val cur = list.indexOfFirst { it.name == st.channelName && it.group == st.group }
-        val next = if (cur < 0) 0 else (cur + delta + list.size) % list.size
-        playChannel(list[next])
+        playChannel(list[if (cur < 0) 0 else (cur + 1) % list.size])
     }
 
     fun setLockLandscape(v: Boolean) = viewModelScope.launch { prefs.setLockLandscape(v) }

@@ -14,7 +14,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -59,7 +58,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,6 +68,7 @@ import com.mytvphone.app.MainViewModel
 import com.mytvphone.app.R
 import com.mytvphone.app.data.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 /**
  * 页面内各层的淡入淡出节奏统一短于 NavHost 的页面转场：
@@ -80,10 +79,10 @@ private val UiFadeOut = fadeOut(tween(130, easing = FastOutLinearInEasing))
 
 /**
  * 横屏全屏播放页（纯净模式：没有任何常驻/可唤出的控制栏）。
- *  - 单击屏幕左侧 1/3：呼出悬浮选台抽屉，5 秒无操作自动收起
- *  - 双击暂停/播放
- *  - 亮度/音量/上下换台等手势已取消（音量用手机物理键，换台用抽屉）
- *  - 返回键 / 全面屏手势返回由 BackHandler 统一接住
+ *  - 唯一的交互：单击屏幕左侧 1/3 呼出悬浮选台抽屉，5 秒无操作自动收起
+ *  - 双击、左右滑动、单击右侧区域均不响应，避免误触
+ *  - 音量用手机物理键，换台用抽屉；退出靠返回键 / 全面屏返回手势
+ *  - 返回键由 BackHandler 统一接住：面板打开时先收面板
  *
  * 系统栏显隐、状态栏图标明暗、屏幕方向**全部由 AppNav 按路由在首帧统一处理**。
  * 这里绝不再写 window / requestedOrientation：旧实现放在 onDispose 里，要等退出动画
@@ -91,8 +90,10 @@ private val UiFadeOut = fadeOut(tween(130, easing = FastOutLinearInEasing))
  */
 @Composable
 fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
-    val context = LocalContext.current
     val st by vm.controller.state.collectAsStateWithLifecycle()
+    // 用可观察的 StateFlow：在播放页导入新源时抽屉里的列表会跟着刷新，
+    // 直接读 vm.channels.value 只在重组时才取到新值，可能一直是旧列表。
+    val channels by vm.channels.collectAsStateWithLifecycle()
 
     var showChannelPanel by remember { mutableStateOf(false) }
     // 每次面板内交互自增，用来重置 5 秒自动隐藏计时
@@ -126,8 +127,8 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         if (showChannelPanel) showChannelPanel = false else leave()
     }
 
-    // 单击屏幕左侧 1/3：呼出选台抽屉；面板已开时点任意处收起。
-    // 播放页不再有任何控制层，其余区域单击不做任何事；双击暂停/播放保留。
+    // 触摸只做一件事：单击左侧 1/3 呼出选台抽屉；抽屉已开时点任意处收起。
+    // 拖动、双击、单击右侧区域均不响应，避免误触。
     val tapModifier = Modifier.pointerInput(Unit) {
         detectTapGestures(
             onTap = { offset ->
@@ -137,27 +138,6 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                     showChannelPanel = true
                 }
             },
-            onDoubleTap = { vm.controller.togglePlayPause() },
-        )
-    }
-
-    // 横向滑动：右滑呼出抽屉、左滑收起，与点击互不干扰
-    val swipeModifier = Modifier.pointerInput(Unit) {
-        var dx = 0f
-        detectHorizontalDragGestures(
-            onDragStart = { dx = 0f },
-            onDragEnd = {
-                val threshold = 64.dp.toPx()
-                if (dx > threshold) {
-                    showChannelPanel = true
-                } else if (dx < -threshold) {
-                    showChannelPanel = false
-                }
-            },
-            onHorizontalDrag = { change, amount ->
-                dx += amount
-                change.consume()
-            },
         )
     }
 
@@ -165,8 +145,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .then(tapModifier)
-            .then(swipeModifier),
+            .then(tapModifier),
     ) {
         // TextureView（见 res/layout/player_view.xml）：普通 View 才能参与 Compose 的
         // alpha 淡出。默认 SurfaceView 是独立窗口层，退出时视频会硬切一下造成闪屏。
@@ -204,7 +183,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                 .width(PANEL_WIDTH + 12.dp),
         ) {
             ChannelPickerPanel(
-                channels = vm.channels.value,
+                channels = channels,
                 currentName = st.channelName,
                 currentGroup = st.group,
                 onPick = { ch ->
@@ -271,10 +250,22 @@ private fun ChannelPickerPanel(
     }
     val listState = rememberLazyListState()
 
-    // 滚动列表也算「有操作」，重置自动隐藏计时
+    // 打开抽屉直接定位到当前正在播放的频道，长列表不用手动翻。
+    val currentIndex = remember(inGroup, currentName, currentGroup) {
+        inGroup.indexOfFirst { it.name == currentName && it.group == currentGroup }
+    }
+    LaunchedEffect(inGroup) {
+        if (currentIndex >= 0) listState.scrollToItem(currentIndex)
+    }
+
+    // 滚动期间每秒续期一次，避免「手指还在滑，面板 5 秒到点自己关掉」
     LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }
-            .collect { scrolling -> if (scrolling) onInteraction() }
+        snapshotFlow { listState.isScrollInProgress }.collectLatest { scrolling ->
+            while (scrolling) {
+                onInteraction()
+                delay(1000)
+            }
+        }
     }
 
     Box(

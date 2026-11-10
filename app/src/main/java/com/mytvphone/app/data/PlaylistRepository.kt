@@ -150,7 +150,7 @@ class PlaylistRepository(private val context: Context) {
         runCatching {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Linux; Android) MyTvPhone/1.0")
+                .header("User-Agent", DEFAULT_USER_AGENT)
                 .build()
             client.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) error("HTTP ${resp.code}")

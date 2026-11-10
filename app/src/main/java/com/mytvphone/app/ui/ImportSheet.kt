@@ -259,11 +259,24 @@ fun ImportSheet(
                                 scope.launch {
                                     busy = true
                                     errorMsg = null
-                                    val result = vm.repo.fetch(url)
+                                    val fetched = vm.repo.fetch(url)
+                                    val bytes = fetched.getOrNull()
+                                    // 解码 + 解析是纯 CPU 操作，可能处理数 MB 文本，不能留在主线程
+                                    val parsed: Result<ParseResult> = if (bytes == null) {
+                                        Result.failure(
+                                            fetched.exceptionOrNull()
+                                                ?: IllegalStateException("拉取失败"),
+                                        )
+                                    } else {
+                                        runCatching {
+                                            withContext(Dispatchers.IO) {
+                                                PlaylistParser.parse(PlaylistParser.decodeAuto(bytes))
+                                            }
+                                        }
+                                    }
                                     busy = false
-                                    result
-                                        .onSuccess { bytes ->
-                                            val r = PlaylistParser.parse(PlaylistParser.decodeAuto(bytes))
+                                    parsed
+                                        .onSuccess { r ->
                                             if (r.isEmpty) {
                                                 errorMsg = "未解析到可用频道（识别格式：${r.format}）"
                                             } else {

@@ -1,5 +1,12 @@
 package com.mytvphone.app.data
 
+/**
+ * 拉流与拉订阅共用的 User-Agent。
+ * 部分源会按 UA 拒绝请求，两处各写一份容易改漏，统一放在这里。
+ * 不带版本号：升级版本时无需改动，也避免与 BuildConfig 版本号脱节。
+ */
+const val DEFAULT_USER_AGENT = "Mozilla/5.0 (Linux; Android 10) MyTvPhone"
+
 /** 一个频道。同名同分组的多个地址会合并进 [urls]，播放失败时自动逐个切换。 */
 data class Channel(
     val id: String = "",

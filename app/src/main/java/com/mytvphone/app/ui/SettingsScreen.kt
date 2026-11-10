@@ -12,9 +12,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -51,6 +53,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mytvphone.app.MainViewModel
+import com.mytvphone.app.data.PlaylistParser
 import com.mytvphone.app.data.Subscription
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -84,8 +87,9 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onEditChannels: (Strin
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         runCatching {
+            // 与直播源导入共用 10MB 上限：误选到视频等大文件时直接报错，不把整份读进内存
             val json = context.contentResolver.openInputStream(uri)?.use {
-                String(it.readBytes(), Charsets.UTF_8)
+                PlaylistParser.decodeAuto(PlaylistParser.readBounded(it))
             }
             if (json != null) vm.importBackup(json) else vm.showToast("读取失败")
         }.onFailure { vm.showToast("读取失败：${it.message}") }
@@ -116,11 +120,13 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onEditChannels: (Strin
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = { vm.showImportSheet() }) {
                         Icon(Icons.Default.Add, contentDescription = null)
-                        Text("  导入新源")
+                        Spacer(Modifier.width(6.dp))
+                        Text("导入新源")
                     }
                     TextButton(onClick = { addingChannel = true }) {
                         Icon(Icons.Default.Add, contentDescription = null)
-                        Text("  添加单个频道")
+                        Spacer(Modifier.width(6.dp))
+                        Text("添加单个频道")
                     }
                 }
             }

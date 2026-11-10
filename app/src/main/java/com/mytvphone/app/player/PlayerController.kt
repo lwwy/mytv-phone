@@ -13,20 +13,20 @@ import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.mytvphone.app.data.Channel
+import com.mytvphone.app.data.DEFAULT_USER_AGENT
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * 播放器状态。播放页是纯净模式（无控制栏），因此这里只保留 UI 真正会读的字段：
+ * 当前频道名 / 分组（用于选台高亮）、错误描述、是否缓冲。
+ */
 data class PlayerState(
     val channelName: String = "",
-    val channelTitle: String = "",
     val group: String = "",
-    val urlIndex: Int = 0,
-    val urlCount: Int = 0,
     val error: String? = null,
-    val info: String? = null,
     val buffering: Boolean = false,
-    val playing: Boolean = false,
 )
 
 /**
@@ -72,10 +72,6 @@ class PlayerController(context: Context) {
                 )
             }
 
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                _state.value = _state.value.copy(playing = isPlaying)
-            }
-
             override fun onPlayerError(error: PlaybackException) {
                 handleError(error)
             }
@@ -86,14 +82,6 @@ class PlayerController(context: Context) {
         if (channel.urls.isEmpty()) return
         current = channel
         urlIndex = 0
-        typeIndex = -1
-        startCurrent()
-    }
-
-    fun selectUrl(index: Int) {
-        val ch = current ?: return
-        if (index !in ch.urls.indices) return
-        urlIndex = index
         typeIndex = -1
         startCurrent()
     }
@@ -109,7 +97,7 @@ class PlayerController(context: Context) {
         val url = ch.urls.getOrNull(urlIndex) ?: return
 
         val headers = HashMap<String, String>()
-        headers["User-Agent"] = "Mozilla/5.0 (Linux; Android) MyTvPhone/1.0"
+        headers["User-Agent"] = DEFAULT_USER_AGENT
         ch.headers.forEach { (k, v) -> if (v.isNotBlank()) headers[k] = v }
         httpFactory.setDefaultRequestProperties(headers)
 
@@ -142,41 +130,28 @@ class PlayerController(context: Context) {
 
         _state.value = PlayerState(
             channelName = ch.name,
-            channelTitle = ch.title,
             group = ch.group,
-            urlIndex = urlIndex,
-            urlCount = ch.urls.size,
             buffering = true,
-            info = if (ch.urls.size > 1) "源 ${urlIndex + 1}/${ch.urls.size}" else null,
         )
     }
 
     private fun handleError(error: PlaybackException) {
         val ch = current ?: return
+        // 依次换解码方式，全都不行再换频道的备用地址；startCurrent 会把 error 清空
         if (typeIndex < forcedTypes.lastIndex) {
             typeIndex++
             startCurrent()
-            _state.value = _state.value.copy(
-                error = null,
-                info = "重试解码方式 ${forcedTypes[typeIndex]}（${typeIndex + 1}/${forcedTypes.size}）",
-            )
             return
         }
         if (urlIndex + 1 < ch.urls.size) {
             urlIndex++
             typeIndex = -1
             startCurrent()
-            _state.value = _state.value.copy(
-                error = null,
-                info = "已自动切换备用源 ${urlIndex + 1}/${ch.urls.size}",
-            )
             return
         }
         _state.value = _state.value.copy(
             error = describeError(error),
-            info = null,
             buffering = false,
-            playing = false,
         )
     }
 
@@ -199,11 +174,7 @@ class PlayerController(context: Context) {
         else -> "播放失败：${e.errorCodeName}${e.message?.let { " · $it" } ?: ""}"
     }
 
-    fun togglePlayPause() {
-        player.playWhenReady = !player.playWhenReady
-    }
-
-    /** 离开播放页时先静音、保留最后一帧，让退出转场期间画面保持静止。 */
+    /** 离开播放页时暂停：保留最后一帧，退出转场期间画面不再变化。 */
     fun pause() {
         player.playWhenReady = false
     }

@@ -74,7 +74,10 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val text = withContext(Dispatchers.IO) {
                 runCatching {
-                    contentResolver.openInputStream(uri)?.use { PlaylistParser.decodeAuto(it.readBytes()) }
+                    // 有界读取：被误分享进来的是视频等大文件时直接失败，不撑爆内存
+                    contentResolver.openInputStream(uri)?.use {
+                        PlaylistParser.decodeAuto(PlaylistParser.readBounded(it))
+                    }
                 }.getOrNull()
             }
             if (text.isNullOrBlank()) {

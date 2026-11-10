@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- 无 ActionBar：ActionBar 由 Compose 的 TopAppBar 提供。
-         状态栏图标明暗由 MyTvPhoneTheme 按深浅模式动态设置，这里不写死。 -->
+         状态栏/导航栏图标明暗由 AppNav 按当前路由统一设置，这里不写死。 -->
     <style name="Theme.MyTvPhone" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/app_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>

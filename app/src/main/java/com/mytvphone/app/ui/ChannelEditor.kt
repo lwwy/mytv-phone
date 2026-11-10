@@ -61,9 +61,11 @@ fun ChannelEditorDialog(
     onConfirm: (name: String, group: String, urls: List<String>) -> Unit,
     onDelete: (() -> Unit)? = null,
 ) {
-    var name by rememberSaveable { mutableStateOf(initialName) }
-    var group by rememberSaveable { mutableStateOf(initialGroup) }
-    var urlText by rememberSaveable { mutableStateOf(initialUrls.joinToString("\n")) }
+    // 用 initial* 作为 key：同一个对话框被复用到另一个频道时（不经过关闭再打开）
+    // 输入框会跟着重置，不会把上一个频道的名称/地址带过去。
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    var group by rememberSaveable(initialGroup) { mutableStateOf(initialGroup) }
+    var urlText by rememberSaveable(initialUrls) { mutableStateOf(initialUrls.joinToString("\n")) }
     var error by remember { mutableStateOf<String?>(null) }
 
     fun submit() {
