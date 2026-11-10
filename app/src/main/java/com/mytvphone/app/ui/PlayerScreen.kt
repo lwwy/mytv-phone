@@ -37,21 +37,15 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.DisposableEffect
@@ -83,14 +77,12 @@ import kotlinx.coroutines.delay
  */
 private val UiFadeIn = fadeIn(tween(180, easing = FastOutSlowInEasing))
 private val UiFadeOut = fadeOut(tween(130, easing = FastOutLinearInEasing))
-private val HintFadeIn = fadeIn(tween(110))
-private val HintFadeOut = fadeOut(tween(180, delayMillis = 60))
 
 /**
- * 横屏全屏播放页。
- *  - 单击：屏幕左侧弹出「选台」面板，其余区域显隐控制层
+ * 横屏全屏播放页（纯净模式：没有任何常驻/可唤出的控制栏）。
+ *  - 单击屏幕左侧 1/3：呼出悬浮选台抽屉，5 秒无操作自动收起
  *  - 双击暂停/播放
- *  - 左侧滑亮度、右侧滑音量、上下滑换台等手势已取消（音量用手机物理键，换台用选台面板）
+ *  - 亮度/音量/上下换台等手势已取消（音量用手机物理键，换台用抽屉）
  *  - 返回键 / 全面屏手势返回由 BackHandler 统一接住
  *
  * 系统栏显隐、状态栏图标明暗、屏幕方向**全部由 AppNav 按路由在首帧统一处理**。
@@ -102,15 +94,11 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val st by vm.controller.state.collectAsStateWithLifecycle()
 
-    var showControls by remember { mutableStateOf(true) }
     var showChannelPanel by remember { mutableStateOf(false) }
     // 每次面板内交互自增，用来重置 5 秒自动隐藏计时
     var panelTick by remember { mutableStateOf(0) }
-    var overlayText by remember { mutableStateOf("") }
-    var overlayVisible by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf("") }
 
-    val scrim = MaterialTheme.colorScheme.scrim
     val err = st.error
 
     // 转场动画结束后才 dispose，此时再彻底停止播放
@@ -124,19 +112,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         onBack()
     }
 
-    fun showOverlay(msg: String) {
-        overlayText = msg
-        overlayVisible = true
-    }
-
     LaunchedEffect(err) { if (err != null) lastError = err }
-
-    LaunchedEffect(showControls) {
-        if (showControls && !showChannelPanel) {
-            delay(4000)
-            showControls = false
-        }
-    }
 
     // 面板弹出后 5 秒无操作自动收起，回到纯净全屏
     LaunchedEffect(showChannelPanel, panelTick) {
@@ -146,34 +122,19 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         }
     }
 
-    LaunchedEffect(overlayText, overlayVisible) {
-        if (overlayVisible) {
-            delay(1200)
-            overlayVisible = false
-        }
-    }
-
     BackHandler {
-        when {
-            showChannelPanel -> showChannelPanel = false
-            showControls -> showControls = false
-            else -> leave()
-        }
+        if (showChannelPanel) showChannelPanel = false else leave()
     }
 
-    // 单击：中央区域呼出/收起选台抽屉，左右边缘显隐控制层；双击暂停/播放
+    // 单击屏幕左侧 1/3：呼出选台抽屉；面板已开时点任意处收起。
+    // 播放页不再有任何控制层，其余区域单击不做任何事；双击暂停/播放保留。
     val tapModifier = Modifier.pointerInput(Unit) {
         detectTapGestures(
             onTap = { offset ->
-                when {
-                    showChannelPanel -> showChannelPanel = false
-                    offset.x < size.width * 0.22f || offset.x > size.width * 0.78f -> {
-                        showControls = !showControls
-                    }
-                    else -> {
-                        showControls = false
-                        showChannelPanel = true
-                    }
+                if (showChannelPanel) {
+                    showChannelPanel = false
+                } else if (offset.x < size.width * 0.33f) {
+                    showChannelPanel = true
                 }
             },
             onDoubleTap = { vm.controller.togglePlayPause() },
@@ -188,7 +149,6 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
             onDragEnd = {
                 val threshold = 64.dp.toPx()
                 if (dx > threshold) {
-                    showControls = false
                     showChannelPanel = true
                 } else if (dx < -threshold) {
                     showChannelPanel = false
@@ -231,88 +191,6 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
             modifier = Modifier.align(Alignment.Center),
         ) {
             CircularProgressIndicator()
-        }
-
-        AnimatedVisibility(
-            visible = showControls && !showChannelPanel && err == null,
-            enter = UiFadeIn,
-            exit = UiFadeOut,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            Box(Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopStart)
-                        .background(scrim.copy(alpha = 0.6f))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconButton(onClick = { leave() }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回列表",
-                            tint = Color.White,
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = st.channelTitle.ifEmpty { st.channelName },
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                        )
-                        Text(
-                            text = st.group + (st.info?.let { " · $it" } ?: ""),
-                            color = Color.White.copy(alpha = 0.75f),
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                        )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalArrangement = Arrangement.spacedBy(28.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    PlayerControlIcon(Icons.Default.SkipPrevious, "上一个频道", 38.dp) {
-                        vm.prevChannel()
-                    }
-                    PlayerControlIcon(
-                        if (st.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        "播放/暂停",
-                        48.dp,
-                    ) { vm.controller.togglePlayPause() }
-                    PlayerControlIcon(Icons.Default.SkipNext, "下一个频道", 38.dp) {
-                        vm.nextChannel()
-                    }
-                }
-
-                if (st.urlCount > 1) {
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .background(scrim.copy(alpha = 0.6f))
-                            .padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("备用源：", color = Color.White, style = MaterialTheme.typography.bodySmall)
-                        for (i in 0 until st.urlCount) {
-                            TextButton(onClick = { vm.controller.selectUrl(i) }) {
-                                Text(
-                                    "${i + 1}",
-                                    color = if (i == st.urlIndex) {
-                                        MaterialTheme.colorScheme.inversePrimary
-                                    } else {
-                                        Color.White
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
         }
 
         // 选台抽屉：从左侧滑入的悬浮卡片，点频道换台并自动收起
@@ -364,21 +242,6 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
             }
         }
 
-        AnimatedVisibility(
-            visible = overlayVisible,
-            enter = HintFadeIn,
-            exit = HintFadeOut,
-            modifier = Modifier.align(Alignment.Center),
-        ) {
-            Text(
-                text = overlayText,
-                color = Color.White,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier
-                    .background(scrim.copy(alpha = 0.72f), MaterialTheme.shapes.small)
-                    .padding(horizontal = 20.dp, vertical = 10.dp),
-            )
-        }
     }
 }
 
@@ -556,16 +419,3 @@ private val PANEL_WIDTH = 320.dp
 
 /** 分组栏宽度：只放纯文字，避免挤压右侧频道名。 */
 private val GROUP_RAIL_WIDTH = 96.dp
-
-
-@Composable
-private fun PlayerControlIcon(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    iconSize: androidx.compose.ui.unit.Dp,
-    onClick: () -> Unit,
-) {
-    IconButton(onClick = onClick) {
-        Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(iconSize))
-    }
-}
