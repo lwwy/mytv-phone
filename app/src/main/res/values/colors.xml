@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="app_background">#FF0F1115</color>
-    <color name="ic_launcher_background">#FF1B2436</color>
+    <!-- 启动瞬间的窗口背景，与 Compose 的 surface 对齐，避免亮/暗闪屏 -->
+    <color name="app_background">#FFF7F9FC</color>
+    <!-- 图标底色：参考图 #276FDC 降饱和、提明度后的柔和蓝 -->
+    <color name="ic_launcher_background">#FF5B8AC8</color>
 </resources>

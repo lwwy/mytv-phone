@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
-import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -25,7 +24,9 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,9 +58,9 @@ import kotlin.math.abs
 /**
  * 横屏全屏播放页。
  *  - 单击显隐控制层，双击暂停/播放
- *  - 全屏任意位置上下滑换台（参考项目只允许屏幕中间 1/3，这里放宽）
- *  - 左右滑：左半屏调亮度、右半屏调音量（参考项目 onScroll 整段被注释，这里启用）
- *  - 返回键 / 全面屏手势返回由 BackHandler 统一接住（修掉参考项目手势返回直接退出的缺陷）
+ *  - 全屏任意位置上下滑换台
+ *  - 左右滑：左半屏调亮度、右半屏调音量
+ *  - 返回键 / 全面屏手势返回由 BackHandler 统一接住
  */
 @Composable
 fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
@@ -72,6 +73,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
     var overlay by remember { mutableStateOf<String?>(null) }
 
     val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
+    val scrim = MaterialTheme.colorScheme.scrim
 
     // 只在此页面强制横屏 + 沉浸式；离开时恢复系统栏与方向
     DisposableEffect(settings.lockLandscape) {
@@ -82,14 +84,13 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         } else {
             ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
+        // 全局已 enableEdgeToEdge()，这里只隐藏系统栏，不再改 decorFits（离开时避免破坏边缘布局）
         activity?.window?.let { w ->
-            WindowCompat.setDecorFitsSystemWindows(w, false)
             WindowCompat.getInsetsController(w, w.decorView)
                 .hide(WindowInsetsCompat.Type.systemBars())
         }
         onDispose {
             activity?.window?.let { w ->
-                WindowCompat.setDecorFitsSystemWindows(w, true)
                 WindowCompat.getInsetsController(w, w.decorView)
                     .show(WindowInsetsCompat.Type.systemBars())
             }
@@ -211,7 +212,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopStart)
-                    .background(Color(0x99000000))
+                    .background(scrim.copy(alpha = 0.6f))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -227,7 +228,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                     )
                     Text(
                         text = st.group + (st.info?.let { " · $it" } ?: ""),
-                        color = Color(0xFFB7C4D6),
+                        color = Color.White.copy(alpha = 0.75f),
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                     )
@@ -239,37 +240,20 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(28.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { vm.prevChannel() }) {
-                    Icon(
-                        Icons.Default.SkipPrevious,
-                        contentDescription = "上一个频道",
-                        tint = Color.White,
-                        modifier = Modifier.size(38.dp),
-                    )
-                }
-                IconButton(onClick = { vm.controller.togglePlayPause() }) {
-                    Icon(
-                        if (st.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = "播放/暂停",
-                        tint = Color.White,
-                        modifier = Modifier.size(48.dp),
-                    )
-                }
-                IconButton(onClick = { vm.nextChannel() }) {
-                    Icon(
-                        Icons.Default.SkipNext,
-                        contentDescription = "下一个频道",
-                        tint = Color.White,
-                        modifier = Modifier.size(38.dp),
-                    )
-                }
+                PlayerControlIcon(Icons.Default.SkipPrevious, "上一个频道", 38.dp) { vm.prevChannel() }
+                PlayerControlIcon(
+                    if (st.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    "播放/暂停",
+                    48.dp,
+                ) { vm.controller.togglePlayPause() }
+                PlayerControlIcon(Icons.Default.SkipNext, "下一个频道", 38.dp) { vm.nextChannel() }
             }
 
             if (st.urlCount > 1) {
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .background(Color(0x99000000))
+                        .background(scrim.copy(alpha = 0.6f))
                         .padding(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -278,7 +262,11 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                         TextButton(onClick = { vm.controller.selectUrl(i) }) {
                             Text(
                                 "${i + 1}",
-                                color = if (i == st.urlIndex) Color(0xFF4F8CFF) else Color.White,
+                                color = if (i == st.urlIndex) {
+                                    MaterialTheme.colorScheme.inversePrimary
+                                } else {
+                                    Color.White
+                                },
                             )
                         }
                     }
@@ -291,13 +279,19 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                 modifier = Modifier
                     .align(Alignment.Center)
                     .padding(28.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ),
             ) {
-                Column(modifier = Modifier.padding(18.dp)) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     Text("播放失败", style = MaterialTheme.typography.titleMedium)
                     Text(err, style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(onClick = { vm.controller.retry() }) { Text("重试") }
-                        Button(onClick = { vm.nextChannel() }) { Text("下一个频道") }
+                        FilledTonalButton(onClick = { vm.nextChannel() }) { Text("下一个频道") }
                     }
                 }
             }
@@ -310,9 +304,21 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .background(Color(0xAA000000))
+                    .background(scrim.copy(alpha = 0.72f), MaterialTheme.shapes.small)
                     .padding(horizontal = 20.dp, vertical = 10.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun PlayerControlIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    iconSize: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick) {
+        Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(iconSize))
     }
 }

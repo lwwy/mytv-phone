@@ -11,9 +11,12 @@ import com.mytvphone.app.data.PlaylistRepository
 import com.mytvphone.app.data.Prefs
 import com.mytvphone.app.data.Subscription
 import com.mytvphone.app.player.PlayerController
+import kotlinx.coroutines.channels.Channel as EventChannel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -36,44 +39,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _externalText = MutableStateFlow<Pair<String, String>?>(null)
     val externalText: StateFlow<Pair<String, String>?> = _externalText.asStateFlow()
 
-    private val _toast = MutableStateFlow<String?>(null)
-    val toast: StateFlow<String?> = _toast.asStateFlow()
+    /** 一次性提示：Channel 会缓冲直到 UI 消费，不会像 StateFlow 那样丢事件。 */
+    private val _toast = EventChannel<String>(EventChannel.BUFFERED)
+    val toast = _toast.receiveAsFlow()
 
     init {
-        repo.load()
         viewModelScope.launch {
-            prefs.settings.collect { s ->
-                _settings.value = s
-                refreshChannels()
-            }
+            repo.load()?.let { showToast(it) }
         }
+        // 设置 + 订阅合并成单一来源，避免两个流各自刷新造成竞态
         viewModelScope.launch {
-            repo.subs.collect {
-                refreshChannels()
-            }
-        }
-        viewModelScope.launch {
-            repo.message.collect { msg ->
-                if (msg != null) {
-                    showToast(msg)
-                    repo.consumeMessage()
+            combine(prefs.settings, repo.subs) { s, subs -> s to subs }
+                .collect { (s, subs) ->
+                    _settings.value = s
+                    val activeId = s.activeSubId.ifEmpty { subs.firstOrNull()?.id ?: "" }
+                    _channels.value = subs.firstOrNull { it.id == activeId }?.channels ?: emptyList()
                 }
-            }
         }
     }
-
-    private fun refreshChannels() {
-        val subs = repo.subs.value
-        val activeId = _settings.value.activeSubId.ifEmpty { subs.firstOrNull()?.id ?: "" }
-        _channels.value = subs.firstOrNull { it.id == activeId }?.channels ?: emptyList()
-    }
-
-    fun activeSubId(): String =
-        _settings.value.activeSubId.ifEmpty { repo.subs.value.firstOrNull()?.id ?: "" }
 
     fun setActiveSub(id: String) = viewModelScope.launch {
         prefs.setActiveSub(id)
-        prefs.setLastChannel("")
         showToast("已切换到：${repo.get(id)?.name ?: ""}")
     }
 
@@ -121,26 +107,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteSubscription(id: String) {
         repo.remove(id)
-        viewModelScope.launch {
-            prefs.setActiveSub(repo.subs.value.firstOrNull()?.id ?: "")
-            prefs.setLastChannel("")
-        }
+        viewModelScope.launch { prefs.setActiveSub(repo.subs.value.firstOrNull()?.id ?: "") }
     }
 
     fun renameSubscription(id: String, name: String) = repo.rename(id, name)
 
     fun exportJson(): String = repo.exportJson()
 
-    fun importBackup(json: String): Boolean {
-        val ok = repo.importBackup(json)
-        if (ok) showToast("配置已导入")
+    fun importBackup(json: String) {
+        val err = repo.importBackup(json)
+        showToast(err ?: "配置已导入")
         viewModelScope.launch { prefs.setActiveSub("") }
-        return ok
     }
 
     fun playChannel(ch: Channel) {
         controller.play(ch)
-        viewModelScope.launch { prefs.setLastChannel(ch.id) }
     }
 
     fun nextChannel() = step(1)
@@ -157,13 +138,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleFavorite(ch: Channel) = viewModelScope.launch {
-        prefs.toggleFavorite(ch.id, _settings.value.favorites)
+        prefs.toggleFavorite(ch.id)
     }
 
     fun setLockLandscape(v: Boolean) = viewModelScope.launch { prefs.setLockLandscape(v) }
     fun setGestures(v: Boolean) = viewModelScope.launch { prefs.setGestures(v) }
-    fun setAutoResume(v: Boolean) = viewModelScope.launch { prefs.setAutoResume(v) }
-    fun setShowLogo(v: Boolean) = viewModelScope.launch { prefs.setShowLogo(v) }
 
     fun showImportSheet() {
         _showImport.value = true
@@ -184,11 +163,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun showToast(msg: String) {
-        _toast.value = msg
-    }
-
-    fun consumeToast() {
-        _toast.value = null
+        _toast.trySend(msg)
     }
 
     override fun onCleared() {

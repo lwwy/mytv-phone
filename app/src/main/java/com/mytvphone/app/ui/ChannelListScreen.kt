@@ -3,7 +3,6 @@
 package com.mytvphone.app.ui
 
 import android.app.Activity
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,9 +27,10 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -39,9 +38,7 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +57,8 @@ import coil.compose.AsyncImage
 import com.mytvphone.app.MainViewModel
 import com.mytvphone.app.data.Channel
 
+private const val ALL_GROUP = "全部"
+
 @Composable
 fun ChannelListScreen(
     vm: MainViewModel,
@@ -71,29 +70,22 @@ fun ChannelListScreen(
     val subs by vm.repo.subs.collectAsStateWithLifecycle()
     val showImport by vm.showImport.collectAsStateWithLifecycle()
     val external by vm.externalText.collectAsStateWithLifecycle()
-    val toast by vm.toast.collectAsStateWithLifecycle()
 
-    val context = LocalContext.current
-    val activity = context as? Activity
+    val activity = LocalContext.current as? Activity
 
     var query by rememberSaveable { mutableStateOf("") }
     var favOnly by rememberSaveable { mutableStateOf(false) }
-    var selectedGroup by rememberSaveable { mutableStateOf("") }
+    var selectedGroup by rememberSaveable { mutableStateOf(ALL_GROUP) }
     var lastBack by remember { mutableStateOf(0L) }
 
-    val groups = remember(channels) { listOf("全部") + channels.map { it.group }.distinct() }
+    val groups = remember(channels) {
+        listOf(ALL_GROUP) + channels.map { it.group }.distinct()
+    }
     val filtered = remember(channels, query, favOnly, selectedGroup, settings.favorites) {
         channels.filter { ch ->
-            (selectedGroup.isEmpty() || selectedGroup == "全部" || ch.group == selectedGroup) &&
+            (selectedGroup == ALL_GROUP || ch.group == selectedGroup) &&
                 (!favOnly || ch.id in settings.favorites) &&
                 (query.isBlank() || ch.name.contains(query, true) || ch.title.contains(query, true))
-        }
-    }
-
-    LaunchedEffect(toast) {
-        toast?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-            vm.consumeToast()
         }
     }
 
@@ -117,9 +109,6 @@ fun ChannelListScreen(
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
             )
         },
         floatingActionButton = {
@@ -140,6 +129,7 @@ fun ChannelListScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 singleLine = true,
+                shape = RoundedCornerShape(28.dp),
                 placeholder = { Text("搜索频道名") },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 trailingIcon = {
@@ -177,15 +167,15 @@ fun ChannelListScreen(
                 )
             }
 
-            if (groups.size > 1) {
+            if (groups.size > 2) {
                 ScrollableTabRow(
                     selectedTabIndex = groups.indexOf(selectedGroup).coerceAtLeast(0),
                     edgePadding = 16.dp,
                 ) {
                     groups.forEach { g ->
                         Tab(
-                            selected = (selectedGroup.isEmpty() && g == "全部") || selectedGroup == g,
-                            onClick = { selectedGroup = if (g == "全部") "" else g },
+                            selected = selectedGroup == g,
+                            onClick = { selectedGroup = g },
                             text = { Text(g) },
                         )
                     }
@@ -201,7 +191,11 @@ fun ChannelListScreen(
                         )
                         Spacer(Modifier.size(8.dp))
                         Text(
-                            text = if (channels.isEmpty()) "点右下角 + 导入 M3U / TXT 文件、粘贴文本或网络订阅" else "换个关键词或分组试试",
+                            text = if (channels.isEmpty()) {
+                                "点右下角 + 导入 M3U / TXT 文件、粘贴文本或网络订阅"
+                            } else {
+                                "换个关键词或分组试试"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -213,11 +207,9 @@ fun ChannelListScreen(
                         ChannelRow(
                             ch = ch,
                             fav = ch.id in settings.favorites,
-                            showLogo = settings.showLogo,
                             onPlay = { onPlay(ch) },
                             onFav = { vm.toggleFavorite(ch) },
                         )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                     }
                 }
             }
@@ -237,52 +229,19 @@ fun ChannelListScreen(
 private fun ChannelRow(
     ch: Channel,
     fav: Boolean,
-    showLogo: Boolean,
     onPlay: () -> Unit,
     onFav: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onPlay() }
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (showLogo && ch.logo.isNotEmpty()) {
-            AsyncImage(
-                model = ch.logo,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF202632)),
-                contentScale = ContentScale.Fit,
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF233047)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = ch.name.take(1),
-                    color = Color(0xFF8AB4FF),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-        }
-
-        Spacer(Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
+    ListItem(
+        headlineContent = {
             Text(
                 text = ch.title.ifEmpty { ch.name },
                 style = MaterialTheme.typography.bodyLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        },
+        supportingContent = {
             Text(
                 text = "${ch.group} · ${ch.urls.size} 个源",
                 style = MaterialTheme.typography.bodySmall,
@@ -290,13 +249,53 @@ private fun ChannelRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-        }
+        },
+        leadingContent = {
+            ChannelAvatar(ch = ch)
+        },
+        trailingContent = {
+            IconButton(onClick = onFav) {
+                Icon(
+                    imageVector = if (fav) Icons.Default.Star else Icons.Default.StarBorder,
+                    contentDescription = if (fav) "取消收藏" else "收藏",
+                    tint = if (fav) {
+                        MaterialTheme.colorScheme.tertiary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.clickable(onClick = onPlay),
+    )
+}
 
-        IconButton(onClick = onFav) {
-            Icon(
-                imageVector = if (fav) Icons.Default.Star else Icons.Default.StarBorder,
-                contentDescription = if (fav) "取消收藏" else "收藏",
-                tint = if (fav) Color(0xFFFFC857) else MaterialTheme.colorScheme.onSurfaceVariant,
+/** 有 tvg-logo 就加载，否则用频道首字作占位，不再需要「显示台标」开关。 */
+@Composable
+private fun ChannelAvatar(ch: Channel) {
+    if (ch.logo.isNotEmpty()) {
+        AsyncImage(
+            model = ch.logo,
+            contentDescription = null,
+            modifier = Modifier
+                .size(42.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            contentScale = ContentScale.Fit,
+        )
+    } else {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = ch.name.take(1),
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                style = MaterialTheme.typography.titleMedium,
             )
         }
     }

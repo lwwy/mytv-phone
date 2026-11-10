@@ -60,6 +60,9 @@ class PlayerController(context: Context) {
     private var typeIndex = -1 // -1 = 交给 Media3 自动探测
     private val forcedTypes = listOf("HLS", "DASH", "RTSP", "Progressive")
 
+    /** 仅记录「进入后台前是否正在播放」，避免 onResume 把用户手动暂停的播放强行恢复。 */
+    private var playingBeforeBackground = false
+
     init {
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -195,20 +198,18 @@ class PlayerController(context: Context) {
         else -> "播放失败：${e.errorCodeName}${e.message?.let { " · $it" } ?: ""}"
     }
 
-    fun clearError() {
-        _state.value = _state.value.copy(error = null)
-    }
-
     fun togglePlayPause() {
         player.playWhenReady = !player.playWhenReady
     }
 
-    fun pause() {
+    fun pauseForLifecycle() {
+        playingBeforeBackground = player.playWhenReady
         player.playWhenReady = false
     }
 
-    fun resume() {
-        player.playWhenReady = true
+    fun resumeForLifecycle() {
+        if (playingBeforeBackground) player.playWhenReady = true
+        playingBeforeBackground = false
     }
 
     fun stop() {

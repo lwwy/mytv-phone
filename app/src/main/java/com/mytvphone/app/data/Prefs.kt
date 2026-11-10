@@ -16,26 +16,25 @@ import java.io.IOException
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "mytv_settings")
 
+/**
+ * 只保留真正生效的设置。
+ * 已移除：autoResume / lastChannelId（只写不读，从未实现「恢复上次频道」）、
+ *        showLogo（开关意义不大，台标统一按有无 logo 自动显示）。
+ */
 data class AppSettings(
     val activeSubId: String = "",
-    val lastChannelId: String = "",
     val favorites: Set<String> = emptySet(),
     val lockLandscape: Boolean = true,
     val gesturesEnabled: Boolean = true,
-    val autoResume: Boolean = true,
-    val showLogo: Boolean = true,
 )
 
 class Prefs(private val context: Context) {
 
     private object K {
         val ACTIVE = stringPreferencesKey("active_sub_id")
-        val LAST_CHANNEL = stringPreferencesKey("last_channel_id")
         val FAVORITES = stringSetPreferencesKey("favorites")
         val LOCK_LANDSCAPE = booleanPreferencesKey("lock_landscape")
         val GESTURES = booleanPreferencesKey("gestures_enabled")
-        val AUTO_RESUME = booleanPreferencesKey("auto_resume")
-        val SHOW_LOGO = booleanPreferencesKey("show_logo")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data
@@ -43,25 +42,20 @@ class Prefs(private val context: Context) {
         .map { p ->
             AppSettings(
                 activeSubId = p[K.ACTIVE] ?: "",
-                lastChannelId = p[K.LAST_CHANNEL] ?: "",
                 favorites = p[K.FAVORITES] ?: emptySet(),
                 lockLandscape = p[K.LOCK_LANDSCAPE] ?: true,
                 gesturesEnabled = p[K.GESTURES] ?: true,
-                autoResume = p[K.AUTO_RESUME] ?: true,
-                showLogo = p[K.SHOW_LOGO] ?: true,
             )
         }
 
     suspend fun setActiveSub(id: String) = context.dataStore.edit { it[K.ACTIVE] = id }
-    suspend fun setLastChannel(id: String) = context.dataStore.edit { it[K.LAST_CHANNEL] = id }
 
-    suspend fun toggleFavorite(id: String, current: Set<String>) {
-        val next = if (id in current) current - id else current + id
-        context.dataStore.edit { it[K.FAVORITES] = next }
+    /** 在 DataStore 事务内基于最新值计算，避免旧代码传快照导致的并发丢收藏。 */
+    suspend fun toggleFavorite(id: String) = context.dataStore.edit { p ->
+        val current = p[K.FAVORITES] ?: emptySet()
+        p[K.FAVORITES] = if (id in current) current - id else current + id
     }
 
     suspend fun setLockLandscape(v: Boolean) = context.dataStore.edit { it[K.LOCK_LANDSCAPE] = v }
     suspend fun setGestures(v: Boolean) = context.dataStore.edit { it[K.GESTURES] = v }
-    suspend fun setAutoResume(v: Boolean) = context.dataStore.edit { it[K.AUTO_RESUME] = v }
-    suspend fun setShowLogo(v: Boolean) = context.dataStore.edit { it[K.SHOW_LOGO] = v }
 }
