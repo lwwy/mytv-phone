@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.util.UnstableApi
 import com.mytvphone.app.data.PlaylistParser
 import com.mytvphone.app.ui.AppNav
 import com.mytvphone.app.ui.MyTvPhoneTheme
@@ -17,6 +18,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+// PlayerController 整体标了 Media3 的 @UnstableApi，这里与 ViewModel、播放页一样显式 opt-in
+@androidx.annotation.OptIn(UnstableApi::class)
 class MainActivity : ComponentActivity() {
 
     private val vm: MainViewModel by viewModels()

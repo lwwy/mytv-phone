@@ -63,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.mytvphone.app.MainViewModel
 import com.mytvphone.app.R
@@ -88,6 +89,7 @@ private val UiFadeOut = fadeOut(tween(130, easing = FastOutLinearInEasing))
  * 这里绝不再写 window / requestedOrientation：旧实现放在 onDispose 里，要等退出动画
  * 放完才恢复，还会与 AppNav 双重写入互相覆盖，正是返回设置页「先闪一下再跳一下」的根因。
  */
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
     val st by vm.controller.state.collectAsStateWithLifecycle()

@@ -3,6 +3,7 @@ package com.mytvphone.app
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.util.UnstableApi
 import com.mytvphone.app.data.AppSettings
 import com.mytvphone.app.data.Channel
 import com.mytvphone.app.data.ParseResult
@@ -22,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
+@androidx.annotation.OptIn(UnstableApi::class)
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val repo = PlaylistRepository(app)
@@ -48,6 +50,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             repo.load()?.let { showToast(it) }
+        }
+        // 写盘失败等异步错误统一走 Snackbar（导入/刷新已先提示成功，这里补真实结果）
+        viewModelScope.launch {
+            repo.writeErrors.collect { showToast(it) }
         }
         // 设置 + 订阅合并成单一来源，避免两个流各自刷新造成竞态
         viewModelScope.launch {
@@ -121,8 +127,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope.launch { prefs.setActiveSub(repo.subs.value.firstOrNull()?.id ?: "") }
         }
     }
-
-    fun renameSubscription(id: String, name: String) = repo.rename(id, name)
 
     /** 当前生效订阅 id：设置里为空时回退到第一份订阅。 */
     private fun activeSubId(): String =

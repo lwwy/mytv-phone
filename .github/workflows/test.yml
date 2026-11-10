@@ -1,4 +1,4 @@
-name: 运行单元测试
+name: 测试与静态检查
 
 on:
   push:
@@ -35,4 +35,32 @@ jobs:
         with:
           name: test-results
           path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 设置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # lint 出现 error 会直接让任务失败（AGP 默认 abortOnError = true），
+      # warning 只记录不阻断构建
+      - name: 运行 lint
+        run: ./gradlew lintDebug --stacktrace
+
+      - name: 上传 lint 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
           if-no-files-found: warn

@@ -110,13 +110,20 @@ app/src/main/java/com/mytvphone/app/
 
 ## 自动化测试
 
-`app/src/test/` 下为 `PlaylistParser` 的 JVM 单元测试（JUnit4），覆盖 M3U / TXT / JSON 正常解析、同名频道合并、格式错误识别、有界读取上限。推送 `main` 或由 PR 触发时，[`test.yml`](.github/workflows/test.yml) 会自动执行 `./gradlew testDebugUnitTest` 并上传测试报告。
+`app/src/test/` 下为纯 JVM 单元测试（JUnit4，无需 Android 运行环境）：
+
+- `PlaylistParserTest`：M3U / TXT / JSON 正常解析、同名频道合并、格式错误识别、有界读取上限。
+- `SubscriptionStoreTest`：订阅文件读取的异常分支——**0 字节 / 全空白 / 字面量 null 一律视为损坏并抛异常**，确保会触发 `.bak` 恢复而不是静默清空；空数组仍是合法空列表。
+
+推送 `main` 或由 PR 触发时，[`test.yml`](.github/workflows/test.yml) 会并行跑两个 job：`testDebugUnitTest`（单测）与 `lintDebug`（静态检查，**error 直接失败**，warning 只记录），报告均作为 artifact 上传。
 
 ## 安全与稳定性
 
 - **不**允许 HTTP 数据源跨协议重定向（`setAllowCrossProtocolRedirects` 已关闭），避免 https 源被 302 降级到 http 造成凭证泄露。
 - `AndroidManifest` 设 `allowBackup=false` 并配 `dataExtractionRules`，彻底禁止云备份与设备迁移读取应用私有数据。
 - 单次导入 / 网络订阅读取上限 **10MB**（`PlaylistParser.MAX_SOURCE_BYTES`），超限直接拒绝，防止超大文件撑爆内存闪退。
+- 订阅落盘为**原子写**（临时文件 + rename），写前把上一版复制为 `.bak`；读到损坏文件（含 **0 字节**）会先备份为 `.corrupt` 再从 `.bak` 恢复，绝不静默清空。
+- 落盘失败不再只写日志：`PlaylistRepository` 会抛一次性事件，由 Snackbar 明确告知「已更新但保存失败，重启后可能丢失」。
 
 ## 已知限制（P2 可选）
 

@@ -7,9 +7,12 @@ import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel as EventChannel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -45,6 +48,16 @@ class PlaylistRepository(private val context: Context) {
     val subs: StateFlow<List<Subscription>> = _subs.asStateFlow()
 
     /**
+     * 落盘失败事件。
+     *
+     * persist() 先更新内存再异步写盘，所以 UI 早已提示「已导入」；如果写盘失败只打日志，
+     * 用户会以为数据存好了，重启后才发现频道没了。这里把失败抛成一次性事件，
+     * 由 ViewModel 转成 Snackbar。
+     */
+    private val _writeErrors = EventChannel<String>(EventChannel.BUFFERED)
+    val writeErrors: Flow<String> = _writeErrors.receiveAsFlow()
+
+    /**
      * 返回错误描述；null 表示成功。
      *
      * 读取失败时**绝不**清空内存列表、也绝不覆盖/删除磁盘原文件：
@@ -55,13 +68,13 @@ class PlaylistRepository(private val context: Context) {
     suspend fun load(): String? = withContext(Dispatchers.IO) {
         try {
             // 文件不存在（首次启动）视为空列表；存在但损坏则抛异常进入下方备份逻辑
-            _subs.value = readJson(store) ?: emptyList()
+            _subs.value = readSubscriptions(store, gson) ?: emptyList()
             null
         } catch (e: Exception) {
             Log.w(TAG, "读取本地订阅失败", e)
             if (store.exists()) runCatching { store.copyTo(corrupt, overwrite = true) }
             // 仅当 .bak 真实存在时才尝试恢复，避免把「无备份」误报成「已从备份恢复」
-            val recovered = if (bak.exists()) runCatching { readJson(bak) }.getOrNull() else null
+            val recovered = if (bak.exists()) runCatching { readSubscriptions(bak, gson) }.getOrNull() else null
             if (recovered != null) {
                 _subs.value = recovered
                 return@withContext "订阅文件损坏，已从备份恢复"
@@ -69,13 +82,6 @@ class PlaylistRepository(private val context: Context) {
             // 无法恢复：保留当前内存列表（不主动清空），仅向上层返回错误提示
             "读取本地订阅失败：${e.message}（已保留原文件副本）"
         }
-    }
-
-    /** 文件不存在返回 null；存在但解析失败抛异常，交由 [load] 处理备份与恢复。 */
-    private fun readJson(file: File): List<Subscription>? {
-        if (!file.exists()) return null
-        val type = object : TypeToken<List<Subscription>>() {}.type
-        return gson.fromJson<List<Subscription>>(file.readText(), type) ?: emptyList()
     }
 
     fun get(id: String): Subscription? = _subs.value.firstOrNull { it.id == id }
@@ -87,10 +93,6 @@ class PlaylistRepository(private val context: Context) {
     /** 刷新成功才覆盖；失败保留上一次的频道列表。 */
     fun replaceChannels(id: String, channels: List<Channel>) {
         persist(_subs.value.map { if (it.id == id) it.copy(channels = channels) else it })
-    }
-
-    fun rename(id: String, name: String) {
-        persist(_subs.value.map { if (it.id == id) it.copy(name = name) else it })
     }
 
     fun remove(id: String) {
@@ -137,15 +139,40 @@ class PlaylistRepository(private val context: Context) {
                     tmp.writeText(json)
                     val ok = tmp.renameTo(store) || runCatching { store.writeText(json) }.isSuccess
                     if (tmp.exists()) runCatching { tmp.delete() }
-                    if (!ok) Log.w(TAG, "保存订阅失败：写入 store 返回失败")
+                    if (!ok) fail("写入文件失败")
                 } catch (e: Exception) {
-                    Log.w(TAG, "保存订阅失败", e)
+                    fail(e.message ?: e.javaClass.simpleName)
                 }
             }
         }
     }
 
+    /** 落盘失败：日志 + 通知 UI。内存列表保持不变，避免 UI 与磁盘出现两种「现实」。 */
+    private fun fail(reason: String) {
+        Log.w(TAG, "保存订阅失败：$reason")
+        _writeErrors.trySend("订阅已更新，但保存到本地失败（$reason），重启后可能丢失")
+    }
+
     private companion object {
         const val TAG = "PlaylistRepository"
     }
+}
+
+/**
+ * 读取订阅 JSON（纯 java.io + Gson，不碰 Android API，可直接单测）。
+ *
+ * 文件不存在返回 null（首次启动）；存在但解析失败抛异常，交由 [PlaylistRepository.load]
+ * 处理 .corrupt 备份与 .bak 恢复。
+ *
+ * **0 字节 / 全空白 / 字面量 null 都算损坏**，绝不能当成「空列表」：
+ * 写到一半被断电或杀进程时 store 会被截断成 0 字节，若这里静默返回空列表，
+ * load() 就不会进 catch、不会触发 .bak 恢复，用户几十个频道会无声消失。
+ */
+internal fun readSubscriptions(file: File, gson: Gson): List<Subscription>? {
+    if (!file.exists()) return null
+    if (file.length() == 0L) error("文件为空，可能写入中断")
+    val text = file.readText()
+    if (text.isBlank()) error("文件内容为空")
+    val type = object : TypeToken<List<Subscription>>() {}.type
+    return gson.fromJson<List<Subscription>>(text, type) ?: error("JSON 内容为 null")
 }
