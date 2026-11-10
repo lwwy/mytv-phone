@@ -1,8 +1,5 @@
 package com.mytvphone.app.ui
 
-import android.app.Activity
-import android.content.Context
-import android.media.AudioManager
 import android.view.LayoutInflater
 import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
@@ -12,17 +9,23 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
@@ -57,8 +60,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.ui.PlayerView
 import com.mytvphone.app.MainViewModel
 import com.mytvphone.app.R
+import com.mytvphone.app.data.Channel
 import kotlinx.coroutines.delay
-import kotlin.math.abs
 
 /**
  * 页面内各层的淡入淡出节奏统一短于 NavHost 的页面转场：
@@ -71,9 +74,9 @@ private val HintFadeOut = fadeOut(tween(180, delayMillis = 60))
 
 /**
  * 横屏全屏播放页。
- *  - 单击显隐控制层，双击暂停/播放
- *  - 全屏任意位置上下滑换台
- *  - 左右滑：左半屏调亮度、右半屏调音量
+ *  - 单击：屏幕左侧弹出「选台」面板，其余区域显隐控制层
+ *  - 双击暂停/播放
+ *  - 左侧滑亮度、右侧滑音量、上下滑换台等手势已取消（音量用手机物理键，换台用选台面板）
  *  - 返回键 / 全面屏手势返回由 BackHandler 统一接住
  *
  * 系统栏显隐、状态栏图标明暗、屏幕方向**全部由 AppNav 按路由在首帧统一处理**。
@@ -83,16 +86,14 @@ private val HintFadeOut = fadeOut(tween(180, delayMillis = 60))
 @Composable
 fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
-    val activity = context as? Activity
     val st by vm.controller.state.collectAsStateWithLifecycle()
-    val settings by vm.settings.collectAsStateWithLifecycle()
 
     var showControls by remember { mutableStateOf(true) }
+    var showChannelPanel by remember { mutableStateOf(false) }
     var overlayText by remember { mutableStateOf("") }
     var overlayVisible by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf("") }
 
-    val audio = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val scrim = MaterialTheme.colorScheme.scrim
     val err = st.error
 
@@ -101,7 +102,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         onDispose { vm.controller.stop() }
     }
 
-    // 退出前先静音并保留最后一帧：淡出期间画面不再变化，过渡更连贯
+    // 退出前先暂停并保留最后一帧：淡出期间画面不再变化，过渡更连贯
     fun leave() {
         vm.controller.pause()
         onBack()
@@ -115,7 +116,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
     LaunchedEffect(err) { if (err != null) lastError = err }
 
     LaunchedEffect(showControls) {
-        if (showControls) {
+        if (showControls && !showChannelPanel) {
             delay(4000)
             showControls = false
         }
@@ -129,75 +130,35 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
     }
 
     BackHandler {
-        if (showControls) showControls = false else leave()
+        when {
+            showChannelPanel -> showChannelPanel = false
+            showControls -> showControls = false
+            else -> leave()
+        }
     }
 
+    // 单击：左侧 35% 区域弹出选台面板，其余区域显隐控制层；双击暂停/播放
     val tapModifier = Modifier.pointerInput(Unit) {
         detectTapGestures(
-            onTap = { showControls = !showControls },
+            onTap = { offset ->
+                if (showChannelPanel) {
+                    showChannelPanel = false
+                } else if (offset.x < size.width * 0.35f) {
+                    showControls = false
+                    showChannelPanel = true
+                } else {
+                    showControls = !showControls
+                }
+            },
             onDoubleTap = { vm.controller.togglePlayPause() },
         )
-    }
-
-    val dragModifier = if (settings.gesturesEnabled) {
-        Modifier.pointerInput(Unit) {
-            var mode = 0 // 0=未定, 1=垂直, 2=水平
-            var accX = 0f
-            var accY = 0f
-            var originX = 0f
-            detectDragGestures(
-                onDragStart = { off ->
-                    mode = 0
-                    accX = 0f
-                    accY = 0f
-                    originX = off.x
-                },
-                onDrag = { _, dragAmount ->
-                    accX += dragAmount.x
-                    accY += dragAmount.y
-                    if (mode == 0 && (abs(accX) > 12f || abs(accY) > 12f)) {
-                        mode = if (abs(accX) > abs(accY)) 2 else 1
-                    }
-                    if (mode == 2) {
-                        val delta = dragAmount.x / size.width.toFloat()
-                        if (originX < size.width / 2f) {
-                            val w = activity?.window
-                            val lp = w?.attributes
-                            if (lp != null) {
-                                val cur = if (lp.screenBrightness in 0f..1f) lp.screenBrightness else 0.5f
-                                val next = (cur + delta).coerceIn(0.02f, 1f)
-                                lp.screenBrightness = next
-                                w.attributes = lp
-                                showOverlay("亮度 ${(next * 100).toInt()}%")
-                            }
-                        } else {
-                            val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                            val cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
-                            val next = (cur + delta * max * 1.5f).toInt().coerceIn(0, max)
-                            audio.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0)
-                            showOverlay("音量 ${(next * 100 / max.coerceAtLeast(1))}%")
-                        }
-                    }
-                },
-                onDragEnd = {
-                    if (mode == 1 && abs(accY) > 90f) {
-                        if (accY < 0) vm.nextChannel() else vm.prevChannel()
-                    }
-                    mode = 0
-                },
-                onDragCancel = { mode = 0 },
-            )
-        }
-    } else {
-        Modifier
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .then(tapModifier)
-            .then(dragModifier),
+            .then(tapModifier),
     ) {
         // TextureView（见 res/layout/player_view.xml）：普通 View 才能参与 Compose 的
         // alpha 淡出。默认 SurfaceView 是独立窗口层，退出时视频会硬切一下造成闪屏。
@@ -225,7 +186,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         }
 
         AnimatedVisibility(
-            visible = showControls && err == null,
+            visible = showControls && !showChannelPanel && err == null,
             enter = UiFadeIn,
             exit = UiFadeOut,
             modifier = Modifier.fillMaxSize(),
@@ -306,6 +267,24 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
             }
         }
 
+        // 选台面板：从左侧滑入，左侧分组栏 + 右侧频道列表，当前频道蓝色高亮
+        AnimatedVisibility(
+            visible = showChannelPanel,
+            enter = slideInHorizontally(tween(220)) { -it },
+            exit = slideOutHorizontally(tween(180)) { -it },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            ChannelPickerPanel(
+                channels = vm.channels.value,
+                currentName = st.channelName,
+                currentGroup = st.group,
+                onPick = { ch ->
+                    vm.playChannel(ch)
+                    showChannelPanel = false
+                },
+            )
+        }
+
         AnimatedVisibility(
             visible = err != null,
             enter = UiFadeIn,
@@ -347,6 +326,148 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                     .background(scrim.copy(alpha = 0.72f), MaterialTheme.shapes.small)
                     .padding(horizontal = 20.dp, vertical = 10.dp),
             )
+        }
+    }
+}
+
+/**
+ * 选台面板：左侧分组栏 + 右侧频道列表。参照 TV 端换台 UI，
+ * 选中分组高亮、当前播放频道蓝色条高亮。点频道即换台并关闭面板。
+ */
+@Composable
+private fun ChannelPickerPanel(
+    channels: List<Channel>,
+    currentName: String,
+    currentGroup: String,
+    onPick: (Channel) -> Unit,
+) {
+    val all = "全部"
+    var selGroup by remember { mutableStateOf(all) }
+    val groups = remember(channels) { listOf(all) + channels.map { it.group }.distinct() }
+    val inGroup = remember(channels, selGroup) {
+        channels.filter { selGroup == all || it.group == selGroup }
+    }
+
+    Row(Modifier.fillMaxSize()) {
+        // 左侧分组栏
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .weight(0.34f)
+                .background(Color(0xE6000000))
+                .padding(vertical = 10.dp),
+        ) {
+            LazyColumn {
+                itemsIndexed(groups) { idx, g ->
+                    val count = if (g == all) channels.size else channels.count { it.group == g }
+                    val active = g == selGroup
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .background(
+                                if (active) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                                } else {
+                                    Color.Transparent
+                                },
+                                MaterialTheme.shapes.small,
+                            )
+                            .clickable { selGroup = g }
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .background(
+                                    if (active) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    },
+                                    MaterialTheme.shapes.extraSmall,
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "${idx + 1}",
+                                color = if (active) Color.White else Color.Black,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                        Text(
+                            g,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 10.dp),
+                            color = if (active) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color.White
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            "$count",
+                            color = Color.White.copy(alpha = 0.55f),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
+            }
+        }
+
+        // 右侧频道列表
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .weight(1f)
+                .background(Color(0xCC000000))
+                .padding(10.dp),
+        ) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                itemsIndexed(inGroup) { idx, ch ->
+                    val cur = ch.name == currentName && ch.group == currentGroup
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (cur) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                MaterialTheme.shapes.small,
+                            )
+                            .clickable { onPick(ch) }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .background(
+                                    if (cur) {
+                                        Color.White
+                                    } else {
+                                        Color.White.copy(alpha = 0.14f)
+                                    },
+                                    MaterialTheme.shapes.extraSmall,
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "${idx + 1}",
+                                color = if (cur) MaterialTheme.colorScheme.primary else Color.White,
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                        Text(
+                            ch.title.ifEmpty { ch.name },
+                            modifier = Modifier.padding(start = 12.dp),
+                            color = if (cur) Color.White else Color.White.copy(alpha = 0.9f),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+            }
         }
     }
 }

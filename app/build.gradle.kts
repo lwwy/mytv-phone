@@ -12,8 +12,8 @@ android {
         applicationId = "com.mytvphone.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2.1"
+        versionCode = 4
+        versionName = "1.2.2"
     }
 
     buildTypes {
@@ -73,4 +73,6 @@ dependencies {
     implementation(libs.coil.compose)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
+
+    testImplementation(libs.junit)
 }

@@ -118,7 +118,13 @@ class PlaylistRepository(private val context: Context) {
                 .build()
             client.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) error("HTTP ${resp.code}")
-                resp.body?.bytes() ?: error("响应内容为空")
+                val body = resp.body ?: error("响应内容为空")
+                // contentLength 已知且超限时提前拒绝；未知长度则边读边限制
+                val len = body.contentLength()
+                if (len > PlaylistParser.MAX_SOURCE_BYTES) {
+                    error("文件过大（${len / 1024 / 1024}MB），已超过上限 ${PlaylistParser.MAX_SOURCE_BYTES / 1024 / 1024}MB")
+                }
+                PlaylistParser.readBounded(body.byteStream(), PlaylistParser.MAX_SOURCE_BYTES)
             }
         }
     }

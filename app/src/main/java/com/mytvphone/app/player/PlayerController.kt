@@ -33,7 +33,9 @@ data class PlayerState(
  * Media3 / ExoPlayer 封装。
  *
  * 沿用参考项目 my-tv-0 的 TVModel.buildSource() 参数：
- *  - DefaultHttpDataSource 允许跨协议重定向、注入 User-Agent / Referer、5 秒超时
+ *  - DefaultHttpDataSource 注入 User-Agent / Referer、5 秒超时
+ *  - **不**允许跨协议重定向（关闭 setAllowCrossProtocolRedirects），避免 https 源被 302
+ *    到 http 造成降级 / 凭证泄露等安全风险
  *  - LiveConfiguration 目标延迟 12 秒（6~30 秒，速度 0.98~1.02）
  *  - 播放失败时按 HLS → DASH → RTSP → Progressive 强制重试，再切换到频道的下一个备用地址
  */
@@ -43,7 +45,6 @@ class PlayerController(context: Context) {
     private val appContext = context.applicationContext
 
     private val httpFactory = DefaultHttpDataSource.Factory()
-        .setAllowCrossProtocolRedirects(true)
         .setKeepPostFor302Redirects(true)
         .setConnectTimeoutMs(5000)
         .setReadTimeoutMs(5000)

@@ -143,7 +143,7 @@ fun ImportSheet(
             val result = withContext(Dispatchers.IO) {
                 val text = runCatching {
                     context.contentResolver.openInputStream(uri)?.use {
-                        PlaylistParser.decodeAuto(it.readBytes())
+                        PlaylistParser.decodeAuto(PlaylistParser.readBounded(it))
                     }
                 }.getOrNull()
                 if (text.isNullOrBlank()) {

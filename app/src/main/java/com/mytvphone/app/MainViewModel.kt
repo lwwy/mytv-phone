@@ -143,7 +143,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setLockLandscape(v: Boolean) = viewModelScope.launch { prefs.setLockLandscape(v) }
-    fun setGestures(v: Boolean) = viewModelScope.launch { prefs.setGestures(v) }
 
     fun showImportSheet() {
         _showImport.value = true

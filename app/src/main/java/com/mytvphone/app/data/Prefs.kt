@@ -23,7 +23,6 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 data class AppSettings(
     val activeSubId: String = "",
     val lockLandscape: Boolean = true,
-    val gesturesEnabled: Boolean = true,
 )
 
 class Prefs(private val context: Context) {
@@ -31,7 +30,6 @@ class Prefs(private val context: Context) {
     private object K {
         val ACTIVE = stringPreferencesKey("active_sub_id")
         val LOCK_LANDSCAPE = booleanPreferencesKey("lock_landscape")
-        val GESTURES = booleanPreferencesKey("gestures_enabled")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data
@@ -40,12 +38,10 @@ class Prefs(private val context: Context) {
             AppSettings(
                 activeSubId = p[K.ACTIVE] ?: "",
                 lockLandscape = p[K.LOCK_LANDSCAPE] ?: true,
-                gesturesEnabled = p[K.GESTURES] ?: true,
             )
         }
 
     suspend fun setActiveSub(id: String) = context.dataStore.edit { it[K.ACTIVE] = id }
 
     suspend fun setLockLandscape(v: Boolean) = context.dataStore.edit { it[K.LOCK_LANDSCAPE] = v }
-    suspend fun setGestures(v: Boolean) = context.dataStore.edit { it[K.GESTURES] = v }
 }

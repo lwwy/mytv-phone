@@ -2,6 +2,7 @@ package com.mytvphone.app.data
 
 import android.util.Base64
 import com.google.gson.JsonParser
+import java.io.InputStream
 import java.net.URLDecoder
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
@@ -28,6 +29,9 @@ import java.util.LinkedHashMap
  *  - 无效行跳过、URL 去重、未填分组归入「未分组」
  */
 object PlaylistParser {
+
+    /** 单次导入 / 网络订阅可读取的最大字节数（10MB），超出直接拒绝，防止大文件撑爆内存闪退。 */
+    const val MAX_SOURCE_BYTES: Long = 10L * 1024 * 1024
 
     // gua64 字母表：64 卦按 0..63 排列（坤=0 … 乾=63），〇 为 padding
     private const val GUA =
@@ -446,5 +450,28 @@ object PlaylistParser {
         val md = MessageDigest.getInstance("MD5")
             .digest("$group\u0000$name".toByteArray(StandardCharsets.UTF_8))
         return md.joinToString("") { b -> "%02x".format(b.toInt() and 0xff) }
+    }
+
+    /**
+     * 有界读取：从输入流按块读入，累计超过 [maxBytes] 立即抛异常，
+     * 避免一次性 readBytes() 把超大文件整块载入内存导致 OOM 闪退。
+     * 用于本地文件（SAF）与网络响应体的读取上限统一。
+     */
+    fun readBounded(stream: InputStream, maxBytes: Long = MAX_SOURCE_BYTES): ByteArray {
+        val buffer = java.io.ByteArrayOutputStream(32 * 1024)
+        val chunk = ByteArray(16 * 1024)
+        var total = 0L
+        while (true) {
+            val n = stream.read(chunk)
+            if (n < 0) break
+            total += n
+            if (total > maxBytes) {
+                throw IllegalStateException(
+                    "文件过大（超过 ${maxBytes / 1024 / 1024}MB），已拒绝读取以防内存溢出"
+                )
+            }
+            buffer.write(chunk, 0, n)
+        }
+        return buffer.toByteArray()
     }
 }

@@ -1,6 +1,6 @@
 # 口袋电视（MyTvPhone）
 
-一个**自用、不上架应用商店**的安卓手机直播播放器。参考 [my-tv-0](https://github.com/vrichv/my-tv-0) 的播放内核与解析实现，但整体按「手机优先」重新设计：竖屏选台、横屏播放、全触屏手势、系统文件选择器导入。
+一个**自用、不上架应用商店**的安卓手机直播播放器。参考 [my-tv-0](https://github.com/vrichv/my-tv-0) 的播放内核与解析实现，但整体按「手机优先」重新设计：竖屏列表选台、横屏全屏播放、点击左侧弹出选台面板、系统文件选择器导入。
 
 > **重要**：本应用**不内置、不分发、不验证任何直播源**。它是一个纯粹的播放器 + 播放列表解析器，频道列表完全由使用者自己导入。示例文件 `samples/` 里的地址均为 `example.com` 保留域名，不可播放，仅用于测试解析功能。
 
@@ -12,7 +12,7 @@
 | 支持格式 | M3U / M3U8、TXT(`#genre#`)、JSON（兼容 my-tv-0 的 `List<TV>`）、Gua64 六十四卦编码（兼容其 `channels.txt`）、无头纯文本 |
 | 解析增强 | `tvg-name` / `tvg-id` / `tvg-logo` / `group-title`；`#EXTVLCOPT` / `#KODIPROP` / `#EXTHTTP` 与 `url|Referer=...` 提取 UA/Referer；UTF-8 ↔ GBK 自动识别；同名频道多源合并且保持顺序 |
 | 播放 | AndroidX Media3 (ExoPlayer) 1.4.0，HLS / DASH / RTSP / Progressive；Live 目标延迟 12 秒；失败时自动按解码方式重试 → 自动切换备用源 → 中文错误提示 |
-| 手机交互 | 竖屏点击频道直接播放、按分组切换列表；横屏单击显隐控件、双击暂停、上下滑换台、左半屏调亮度、右半屏调音量；返回键与全面屏手势统一处理 |
+| 手机交互 | 竖屏点击频道直接播放、按分组筛选列表；横屏单击右侧显隐控件、双击暂停/播放、**单击屏幕左侧弹出选台面板**（左侧分组栏 + 右侧频道列表，当前频道蓝色高亮）；音量用手机物理键；返回键与全面屏手势统一处理 |
 | 订阅管理 | 多份订阅并存、切换、重命名、删除、网络订阅一键刷新（失败保留上次结果）、配置备份导出/恢复 |
 | 其他 | 不锁死方向、跟随系统语言、沉浸式仅作用于横屏播放页、无需任何存储权限、`usesCleartextTraffic` 支持 http 源 |
 
@@ -49,7 +49,7 @@ adb install -r app-debug.apk
 1. 首次打开是空列表 → 点右下角 **+** → 选择导入方式。`samples/example.m3u` 可以先用来验证解析流程。
 2. 导入时会先显示**预览**（格式 / 频道数 / 分组数 / 前 5 条），确认后才写入。
 3. 竖屏列表点频道 → 自动转横屏全屏播放。
-4. 横屏手势：单击显示控件、双击暂停/播放、**全屏任意位置**上下滑换台、左右滑调亮度/音量、返回键先收控件再退回列表。
+4. 横屏播放：单击右侧区域显隐控制层、双击暂停/播放；**单击屏幕左侧弹出选台面板**（左侧分组栏 + 右侧频道列表，当前频道蓝色高亮，点频道即换台）；音量用手机物理键；返回键先收面板/控件再退回列表。
 5. 设置页可切换 / 刷新 / 删除订阅，导出配置备份。
 
 ### 支持格式速览
@@ -84,7 +84,7 @@ TXT：
 | SAF `content://` 导入 | 原项目 `parseUri()` 只认 `file://`，Android 10+ 分区存储下基本读不到 |
 | 解析阶段提取 UA / Referer | 原项目有 headers 字段但解析器没从 M3U 里读，带校验的源会 403 |
 | `OnBackPressedDispatcher`（Compose `BackHandler`） | 原项目只覆写 `onKeyDown(KEYCODE_BACK)`，全面屏手势返回会直接退出 |
-| 全屏任意位置上下滑换台 / 启用左右滑 | 原项目 fling 仅限屏幕中间 1/3，`onScroll` 整段被注释 |
+| 单击屏幕左侧弹出选台面板（分组栏 + 频道列表）替代滑动手势 | 原项目 fling 仅限屏幕中间 1/3，`onScroll` 整段被注释，无选台 UI |
 | 不写死繁体、不强制全局横屏、不声明 leanback、加 arm64 支持 | 手机适配 |
 
 ## 工程结构
@@ -107,6 +107,16 @@ app/src/main/java/com/mytvphone/app/
     ├── PlayerScreen.kt       # 横屏播放 + 手势
     └── SettingsScreen.kt     # 设置与订阅管理
 ```
+
+## 自动化测试
+
+`app/src/test/` 下为 `PlaylistParser` 的 JVM 单元测试（JUnit4），覆盖 M3U / TXT / JSON 正常解析、同名频道合并、格式错误识别、有界读取上限。推送 `main` 或由 PR 触发时，[`test.yml`](.github/workflows/test.yml) 会自动执行 `./gradlew testDebugUnitTest` 并上传测试报告。
+
+## 安全与稳定性
+
+- **不**允许 HTTP 数据源跨协议重定向（`setAllowCrossProtocolRedirects` 已关闭），避免 https 源被 302 降级到 http 造成凭证泄露。
+- `AndroidManifest` 设 `allowBackup=false` 并配 `dataExtractionRules`，彻底禁止云备份与设备迁移读取应用私有数据。
+- 单次导入 / 网络订阅读取上限 **10MB**（`PlaylistParser.MAX_SOURCE_BYTES`），超限直接拒绝，防止超大文件撑爆内存闪退。
 
 ## 已知限制（P2 可选）
 

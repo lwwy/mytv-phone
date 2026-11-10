@@ -166,15 +166,6 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     modifier = Modifier.animateItem(),
                 )
             }
-            item {
-                SwitchRow(
-                    title = "滑动手势",
-                    desc = "上下滑换台、左半屏调亮度、右半屏调音量",
-                    checked = settings.gesturesEnabled,
-                    onChange = { vm.setGestures(it) },
-                    modifier = Modifier.animateItem(),
-                )
-            }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
             item { SectionHeader("关于") }

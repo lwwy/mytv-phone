@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  数据提取规则：彻底禁止云备份（cloud-backup）与设备到设备迁移（device-transfer）
+  读取本应用私有目录（playlists.json、DataStore 等），防止订阅列表等数据被自动备份
+  同步到云端或在换机时明文流出。配合 AndroidManifest 的 android:allowBackup="false" 双保险。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
