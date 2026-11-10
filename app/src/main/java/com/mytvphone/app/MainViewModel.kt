@@ -117,6 +117,91 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun renameSubscription(id: String, name: String) = repo.rename(id, name)
 
+    /** 当前生效订阅 id：设置里为空时回退到第一份订阅。 */
+    private fun activeSubId(): String =
+        _settings.value.activeSubId.ifEmpty { repo.subs.value.firstOrNull()?.id ?: "" }
+
+    /**
+     * 手工添加单个频道。
+     * [subId] 为空时写入当前订阅；当前没有任何订阅则新建一份「我的频道」并切换过去，
+     * 这样「设置 → 添加频道」在首次使用时也能直接用。
+     */
+    fun addChannel(
+        name: String,
+        group: String,
+        urls: List<String>,
+        subId: String? = null,
+    ) {
+        val cleanName = name.trim()
+        val cleanUrls = urls.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (cleanName.isEmpty()) {
+            showToast("请填写频道名称")
+            return
+        }
+        if (cleanUrls.isEmpty()) {
+            showToast("请至少填写一个播放地址")
+            return
+        }
+        val channel = Channel(
+            id = UUID.randomUUID().toString(),
+            name = cleanName,
+            title = cleanName,
+            group = group.trim().ifBlank { "未分组" },
+            urls = cleanUrls,
+        )
+        val target = subId ?: activeSubId()
+        if (target.isEmpty() || repo.get(target) == null) {
+            val sub = Subscription(
+                id = UUID.randomUUID().toString(),
+                name = "我的频道",
+                source = "手动添加",
+                importedAt = System.currentTimeMillis(),
+                channels = listOf(channel),
+            )
+            repo.add(sub)
+            viewModelScope.launch { prefs.setActiveSub(sub.id) }
+            showToast("已新建「我的频道」并添加：$cleanName")
+        } else {
+            repo.addChannel(target, channel)
+            showToast("已添加频道：$cleanName")
+        }
+    }
+
+    /** 编辑频道：保留 id / logo / 请求头，只改名称、分组与地址列表。 */
+    fun updateChannel(
+        subId: String,
+        original: Channel,
+        name: String,
+        group: String,
+        urls: List<String>,
+    ) {
+        val cleanName = name.trim()
+        val cleanUrls = urls.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (cleanName.isEmpty()) {
+            showToast("频道名称不能为空")
+            return
+        }
+        if (cleanUrls.isEmpty()) {
+            showToast("请至少保留一个播放地址")
+            return
+        }
+        repo.updateChannel(
+            subId,
+            original.copy(
+                name = cleanName,
+                title = cleanName,
+                group = group.trim().ifBlank { "未分组" },
+                urls = cleanUrls,
+            ),
+        )
+        showToast("已保存：$cleanName")
+    }
+
+    fun deleteChannel(subId: String, channelId: String) {
+        repo.removeChannel(subId, channelId)
+        showToast("已删除该频道")
+    }
+
     fun exportJson(): String = repo.exportJson()
 
     fun importBackup(json: String) {

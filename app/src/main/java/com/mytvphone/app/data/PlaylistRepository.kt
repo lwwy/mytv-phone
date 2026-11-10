@@ -93,6 +93,42 @@ class PlaylistRepository(private val context: Context) {
         persist(_subs.value.map { if (it.id == id) it.copy(name = name) else it })
     }
 
+    /** 向指定订阅追加一个手工录入的频道。 */
+    fun addChannel(subId: String, channel: Channel) {
+        persist(
+            _subs.value.map {
+                if (it.id == subId) it.copy(channels = it.channels + channel) else it
+            },
+        )
+    }
+
+    /** 按 [Channel.id] 原地替换频道，id 保持不变以免列表 key 变化导致整行重建。 */
+    fun updateChannel(subId: String, channel: Channel) {
+        persist(
+            _subs.value.map { sub ->
+                if (sub.id != subId) {
+                    sub
+                } else {
+                    sub.copy(
+                        channels = sub.channels.map { if (it.id == channel.id) channel else it },
+                    )
+                }
+            },
+        )
+    }
+
+    fun removeChannel(subId: String, channelId: String) {
+        persist(
+            _subs.value.map {
+                if (it.id == subId) {
+                    it.copy(channels = it.channels.filterNot { ch -> ch.id == channelId })
+                } else {
+                    it
+                }
+            },
+        )
+    }
+
     fun remove(id: String) {
         persist(_subs.value.filter { it.id != id })
     }

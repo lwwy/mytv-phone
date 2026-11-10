@@ -17,14 +17,17 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -42,6 +45,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -51,9 +55,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -333,6 +339,11 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
 /**
  * 选台面板：左侧分组栏 + 右侧频道列表。参照 TV 端换台 UI，
  * 选中分组高亮、当前播放频道蓝色条高亮。点频道即换台并关闭面板。
+ *
+ * 布局约束：
+ *  - 面板只占屏幕左侧 62% 宽度，右侧留出正在播放的画面；
+ *  - 频道行的高亮底色在 item 内再加左右内边距，蓝色条两端不会顶到屏幕边缘；
+ *  - 整体套 [WindowInsets.safeDrawing]，横屏时避开刘海 / 曲面屏边缘，避免被裁切。
  */
 @Composable
 private fun ChannelPickerPanel(
@@ -348,14 +359,19 @@ private fun ChannelPickerPanel(
         channels.filter { selGroup == all || it.group == selGroup }
     }
 
-    Row(Modifier.fillMaxSize()) {
+    Row(
+        modifier = Modifier
+            .fillMaxHeight()
+            .fillMaxWidth(0.62f)
+            .background(Color(0xF2000000))
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+    ) {
         // 左侧分组栏
         Column(
             modifier = Modifier
                 .fillMaxHeight()
                 .weight(0.34f)
-                .background(Color(0xE6000000))
-                .padding(vertical = 10.dp),
+                .padding(vertical = 8.dp),
         ) {
             LazyColumn {
                 itemsIndexed(groups) { idx, g ->
@@ -364,17 +380,17 @@ private fun ChannelPickerPanel(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 10.dp, vertical = 3.dp)
+                            .clip(MaterialTheme.shapes.small)
                             .background(
                                 if (active) {
                                     MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
                                 } else {
                                     Color.Transparent
-                                },
-                                MaterialTheme.shapes.small,
+                                }
                             )
                             .clickable { selGroup = g }
-                            .padding(10.dp),
+                            .padding(horizontal = 8.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Box(
@@ -384,7 +400,7 @@ private fun ChannelPickerPanel(
                                     if (active) {
                                         MaterialTheme.colorScheme.primary
                                     } else {
-                                        MaterialTheme.colorScheme.surfaceVariant
+                                        Color.White.copy(alpha = 0.16f)
                                     },
                                     MaterialTheme.shapes.extraSmall,
                                 ),
@@ -392,7 +408,7 @@ private fun ChannelPickerPanel(
                         ) {
                             Text(
                                 "${idx + 1}",
-                                color = if (active) Color.White else Color.Black,
+                                color = Color.White,
                                 style = MaterialTheme.typography.labelSmall,
                             )
                         }
@@ -407,6 +423,7 @@ private fun ChannelPickerPanel(
                                 Color.White
                             },
                             style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
                         )
                         Text(
                             "$count",
@@ -418,54 +435,63 @@ private fun ChannelPickerPanel(
             }
         }
 
-        // 右侧频道列表
-        Column(
+        VerticalDivider(
+            modifier = Modifier.fillMaxHeight(),
+            color = Color.White.copy(alpha = 0.12f),
+        )
+
+        // 右侧频道列表：左右各留 12dp，蓝色高亮条不贴屏幕边缘
+        LazyColumn(
             modifier = Modifier
                 .fillMaxHeight()
                 .weight(1f)
-                .background(Color(0xCC000000))
-                .padding(10.dp),
+                .padding(vertical = 8.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                itemsIndexed(inGroup) { idx, ch ->
-                    val cur = ch.name == currentName && ch.group == currentGroup
-                    Row(
+            itemsIndexed(inGroup, key = { _, ch -> ch.id }) { idx, ch ->
+                val cur = ch.name == currentName && ch.group == currentGroup
+                val index = idx + 1
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.small)
+                        .background(
+                            if (cur) MaterialTheme.colorScheme.primary else Color.Transparent
+                        )
+                        .clickable { onPick(ch) }
+                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .size(28.dp)
                             .background(
-                                if (cur) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                MaterialTheme.shapes.small,
-                            )
-                            .clickable { onPick(ch) }
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                                if (cur) {
+                                    Color.White
+                                } else {
+                                    Color.White.copy(alpha = 0.14f)
+                                },
+                                MaterialTheme.shapes.extraSmall,
+                            ),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .background(
-                                    if (cur) {
-                                        Color.White
-                                    } else {
-                                        Color.White.copy(alpha = 0.14f)
-                                    },
-                                    MaterialTheme.shapes.extraSmall,
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "${idx + 1}",
-                                color = if (cur) MaterialTheme.colorScheme.primary else Color.White,
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
                         Text(
-                            ch.title.ifEmpty { ch.name },
-                            modifier = Modifier.padding(start = 12.dp),
-                            color = if (cur) Color.White else Color.White.copy(alpha = 0.9f),
-                            style = MaterialTheme.typography.bodyLarge,
+                            "$index",
+                            color = if (cur) MaterialTheme.colorScheme.primary else Color.White,
+                            style = MaterialTheme.typography.labelMedium,
                         )
                     }
+                    Text(
+                        ch.title.ifEmpty { ch.name },
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp),
+                        color = if (cur) Color.White else Color.White.copy(alpha = 0.9f),
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }

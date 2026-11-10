@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -60,10 +61,11 @@ import java.util.Locale
  * active 标记改由响应式的 settings 计算（旧代码直接读 ViewModel 快照，切换订阅后不刷新）。
  */
 @Composable
-fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
+fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onEditChannels: (String) -> Unit) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val subs by vm.repo.subs.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var addingChannel by remember { mutableStateOf(false) }
 
     val createDoc = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -116,6 +118,10 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         Icon(Icons.Default.Add, contentDescription = null)
                         Text("  导入新源")
                     }
+                    TextButton(onClick = { addingChannel = true }) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Text("  添加单个频道")
+                    }
                 }
             }
 
@@ -138,6 +144,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         (settings.activeSubId.isEmpty() && sub.id == subs.firstOrNull()?.id),
                     onSelect = { vm.setActiveSub(sub.id) },
                     onRefresh = { vm.refreshSubscription(sub.id) },
+                    onEdit = { onEditChannels(sub.id) },
                     onDelete = { vm.deleteSubscription(sub.id) },
                     modifier = Modifier.animateItem(),
                 )
@@ -187,6 +194,20 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (addingChannel) {
+        ChannelEditorDialog(
+            title = "添加单个频道",
+            initialName = "",
+            initialGroup = "",
+            initialUrls = emptyList(),
+            onDismiss = { addingChannel = false },
+            onConfirm = { name, group, urls ->
+                vm.addChannel(name, group, urls)
+                addingChannel = false
+            },
+        )
     }
 }
 
@@ -252,6 +273,7 @@ private fun SubscriptionCard(
     active: Boolean,
     onSelect: () -> Unit,
     onRefresh: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -301,6 +323,9 @@ private fun SubscriptionCard(
                 IconButton(onClick = onRefresh) {
                     Icon(Icons.Default.Refresh, contentDescription = "刷新订阅")
                 }
+            }
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Default.Edit, contentDescription = "编辑频道")
             }
             IconButton(onClick = { confirmDelete = true }) {
                 Icon(Icons.Default.Delete, contentDescription = "删除订阅")
