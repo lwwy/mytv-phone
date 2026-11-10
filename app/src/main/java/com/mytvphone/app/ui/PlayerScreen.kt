@@ -12,7 +12,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,15 +22,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
@@ -45,8 +52,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -59,6 +66,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -96,6 +104,8 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
 
     var showControls by remember { mutableStateOf(true) }
     var showChannelPanel by remember { mutableStateOf(false) }
+    // 每次面板内交互自增，用来重置 5 秒自动隐藏计时
+    var panelTick by remember { mutableStateOf(0) }
     var overlayText by remember { mutableStateOf("") }
     var overlayVisible by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf("") }
@@ -128,6 +138,14 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         }
     }
 
+    // 面板弹出后 5 秒无操作自动收起，回到纯净全屏
+    LaunchedEffect(showChannelPanel, panelTick) {
+        if (showChannelPanel) {
+            delay(5000)
+            showChannelPanel = false
+        }
+    }
+
     LaunchedEffect(overlayText, overlayVisible) {
         if (overlayVisible) {
             delay(1200)
@@ -143,20 +161,43 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         }
     }
 
-    // 单击：左侧 35% 区域弹出选台面板，其余区域显隐控制层；双击暂停/播放
+    // 单击：中央区域呼出/收起选台抽屉，左右边缘显隐控制层；双击暂停/播放
     val tapModifier = Modifier.pointerInput(Unit) {
         detectTapGestures(
             onTap = { offset ->
-                if (showChannelPanel) {
-                    showChannelPanel = false
-                } else if (offset.x < size.width * 0.35f) {
-                    showControls = false
-                    showChannelPanel = true
-                } else {
-                    showControls = !showControls
+                when {
+                    showChannelPanel -> showChannelPanel = false
+                    offset.x < size.width * 0.22f || offset.x > size.width * 0.78f -> {
+                        showControls = !showControls
+                    }
+                    else -> {
+                        showControls = false
+                        showChannelPanel = true
+                    }
                 }
             },
             onDoubleTap = { vm.controller.togglePlayPause() },
+        )
+    }
+
+    // 横向滑动：右滑呼出抽屉、左滑收起，与点击互不干扰
+    val swipeModifier = Modifier.pointerInput(Unit) {
+        var dx = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { dx = 0f },
+            onDragEnd = {
+                val threshold = 64.dp.toPx()
+                if (dx > threshold) {
+                    showControls = false
+                    showChannelPanel = true
+                } else if (dx < -threshold) {
+                    showChannelPanel = false
+                }
+            },
+            onHorizontalDrag = { change, amount ->
+                dx += amount
+                change.consume()
+            },
         )
     }
 
@@ -164,7 +205,8 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .then(tapModifier),
+            .then(tapModifier)
+            .then(swipeModifier),
     ) {
         // TextureView（见 res/layout/player_view.xml）：普通 View 才能参与 Compose 的
         // alpha 淡出。默认 SurfaceView 是独立窗口层，退出时视频会硬切一下造成闪屏。
@@ -273,12 +315,15 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
             }
         }
 
-        // 选台面板：从左侧滑入，左侧分组栏 + 右侧频道列表，当前频道蓝色高亮
+        // 选台抽屉：从左侧滑入的悬浮卡片，点频道换台并自动收起
         AnimatedVisibility(
             visible = showChannelPanel,
             enter = slideInHorizontally(tween(220)) { -it },
             exit = slideOutHorizontally(tween(180)) { -it },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxHeight()
+                .width(PANEL_WIDTH + 12.dp),
         ) {
             ChannelPickerPanel(
                 channels = vm.channels.value,
@@ -288,6 +333,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
                     vm.playChannel(ch)
                     showChannelPanel = false
                 },
+                onInteraction = { panelTick++ },
             )
         }
 
@@ -337,13 +383,14 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
 }
 
 /**
- * 选台面板：左侧分组栏 + 右侧频道列表。参照 TV 端换台 UI，
- * 选中分组高亮、当前播放频道蓝色条高亮。点频道即换台并关闭面板。
+ * 悬浮选台抽屉。
  *
- * 布局约束：
- *  - 面板只占屏幕左侧 62% 宽度，右侧留出正在播放的画面；
- *  - 频道行的高亮底色在 item 内再加左右内边距，蓝色条两端不会顶到屏幕边缘；
- *  - 整体套 [WindowInsets.safeDrawing]，横屏时避开刘海 / 曲面屏边缘，避免被裁切。
+ * 设计要点：
+ *  - 不再是铺满左侧的黑块，而是一张悬浮圆角卡片（80% 不透明深灰），后方视频隐约可见；
+ *  - 顶部留 72dp 安全区、四周留边距，避免遮住左上角台标与屏幕圆角/刘海；
+ *  - 左侧分组改为纯文字竖排，选中项高亮加粗 + 底部小横线，没有数字色块；
+ *  - 右侧频道改为圆角小卡片，选中项淡蓝半透明底 + 蓝色文字 + 小播放图标；
+ *  - 组点击 / 列表滚动都会回调 [onInteraction]，用于重置 5 秒自动隐藏计时。
  */
 @Composable
 private fun ChannelPickerPanel(
@@ -351,6 +398,7 @@ private fun ChannelPickerPanel(
     currentName: String,
     currentGroup: String,
     onPick: (Channel) -> Unit,
+    onInteraction: () -> Unit,
 ) {
     val all = "全部"
     var selGroup by remember { mutableStateOf(all) }
@@ -358,145 +406,157 @@ private fun ChannelPickerPanel(
     val inGroup = remember(channels, selGroup) {
         channels.filter { selGroup == all || it.group == selGroup }
     }
+    val listState = rememberLazyListState()
 
-    Row(
+    // 滚动列表也算「有操作」，重置自动隐藏计时
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { scrolling -> if (scrolling) onInteraction() }
+    }
+
+    Box(
         modifier = Modifier
-            .fillMaxHeight()
-            .fillMaxWidth(0.62f)
-            .background(Color(0xF2000000))
-            .windowInsetsPadding(WindowInsets.safeDrawing),
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            // 顶部留出台标安全区，底部留出手势条区域
+            .padding(start = 12.dp, top = 72.dp, bottom = 24.dp)
+            // 消费面板内的点击：既不会穿透到播放器关闭面板，也算作一次操作
+            .pointerInput(Unit) { detectTapGestures(onTap = { onInteraction() }) },
     ) {
-        // 左侧分组栏
         Column(
             modifier = Modifier
+                .width(PANEL_WIDTH)
                 .fillMaxHeight()
-                .weight(0.34f)
-                .padding(vertical = 8.dp),
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xCC1C1C1E))
+                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
+                .padding(vertical = 14.dp),
         ) {
-            LazyColumn {
-                itemsIndexed(groups) { idx, g ->
-                    val count = if (g == all) channels.size else channels.count { it.group == g }
-                    val active = g == selGroup
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 3.dp)
-                            .clip(MaterialTheme.shapes.small)
-                            .background(
-                                if (active) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-                                } else {
-                                    Color.Transparent
-                                }
-                            )
-                            .clickable { selGroup = g }
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
+            Row(
+                modifier = Modifier.padding(start = 18.dp, end = 16.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "选台",
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = "  ${channels.size} 个频道",
+                    color = Color.White.copy(alpha = 0.45f),
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+
+            Row(Modifier.weight(1f)) {
+                // 左侧分组：纯文字竖排
+                LazyColumn(
+                    modifier = Modifier
+                        .width(GROUP_RAIL_WIDTH)
+                        .fillMaxHeight(),
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                ) {
+                    items(groups) { g ->
+                        val active = g == selGroup
+                        Column(
                             modifier = Modifier
-                                .size(26.dp)
-                                .background(
-                                    if (active) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        Color.White.copy(alpha = 0.16f)
-                                    },
-                                    MaterialTheme.shapes.extraSmall,
-                                ),
-                            contentAlignment = Alignment.Center,
+                                .fillMaxWidth()
+                                .clickable {
+                                    selGroup = g
+                                    onInteraction()
+                                }
+                                .padding(horizontal = 18.dp, vertical = 9.dp),
                         ) {
                             Text(
-                                "${idx + 1}",
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelSmall,
+                                text = g,
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    Color.White.copy(alpha = 0.62f)
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
+                            if (active) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = 6.dp)
+                                        .width(16.dp)
+                                        .height(2.dp)
+                                        .background(
+                                            MaterialTheme.colorScheme.primary,
+                                            RoundedCornerShape(1.dp),
+                                        ),
+                                )
+                            }
                         }
-                        Text(
-                            g,
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(start = 10.dp),
-                            color = if (active) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                Color.White
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                        )
-                        Text(
-                            "$count",
-                            color = Color.White.copy(alpha = 0.55f),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
                     }
                 }
-            }
-        }
 
-        VerticalDivider(
-            modifier = Modifier.fillMaxHeight(),
-            color = Color.White.copy(alpha = 0.12f),
-        )
-
-        // 右侧频道列表：左右各留 12dp，蓝色高亮条不贴屏幕边缘
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxHeight()
-                .weight(1f)
-                .padding(vertical = 8.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            itemsIndexed(inGroup, key = { _, ch -> ch.id }) { idx, ch ->
-                val cur = ch.name == currentName && ch.group == currentGroup
-                val index = idx + 1
-                Row(
+                // 右侧频道：圆角小卡片
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.small)
-                        .background(
-                            if (cur) MaterialTheme.colorScheme.primary else Color.Transparent
-                        )
-                        .clickable { onPick(ch) }
-                        .padding(horizontal = 10.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentPadding = PaddingValues(start = 2.dp, end = 14.dp, bottom = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .background(
-                                if (cur) {
-                                    Color.White
+                    itemsIndexed(inGroup, key = { _, ch -> ch.id }) { _, ch ->
+                        val cur = ch.name == currentName && ch.group == currentGroup
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (cur) {
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                                    } else {
+                                        Color.White.copy(alpha = 0.04f)
+                                    }
+                                )
+                                .clickable { onPick(ch) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = ch.title.ifEmpty { ch.name },
+                                modifier = Modifier.weight(1f),
+                                color = if (cur) {
+                                    MaterialTheme.colorScheme.primary
                                 } else {
-                                    Color.White.copy(alpha = 0.14f)
+                                    Color.White.copy(alpha = 0.88f)
                                 },
-                                MaterialTheme.shapes.extraSmall,
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "$index",
-                            color = if (cur) MaterialTheme.colorScheme.primary else Color.White,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (cur) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = "正在播放",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .padding(start = 6.dp)
+                                        .size(16.dp),
+                                )
+                            }
+                        }
                     }
-                    Text(
-                        ch.title.ifEmpty { ch.name },
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 12.dp),
-                        color = if (cur) Color.White else Color.White.copy(alpha = 0.9f),
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
                 }
             }
         }
     }
 }
+
+/** 抽屉宽度：手机上约占横屏宽度的 40%，不遮挡正在播放的画面主体。 */
+private val PANEL_WIDTH = 320.dp
+
+/** 分组栏宽度：只放纯文字，避免挤压右侧频道名。 */
+private val GROUP_RAIL_WIDTH = 96.dp
+
 
 @Composable
 private fun PlayerControlIcon(
