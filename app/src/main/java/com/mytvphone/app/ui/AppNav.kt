@@ -34,9 +34,6 @@ object Routes {
     const val LIST = "list"
     const val PLAYER = "player"
     const val SETTINGS = "settings"
-    const val CHANNELS = "channels/{subId}"
-
-    fun channels(subId: String) = "channels/$subId"
 }
 
 /**
@@ -121,18 +118,7 @@ fun AppNav(vm: MainViewModel) {
                 PlayerScreen(vm = vm, onBack = { nav.popBackStack() })
             }
             composable(Routes.SETTINGS) {
-                SettingsScreen(
-                    vm = vm,
-                    onBack = { nav.popBackStack() },
-                    onEditChannels = { subId -> nav.navigate(Routes.channels(subId)) },
-                )
-            }
-            composable(Routes.CHANNELS) { entry ->
-                ChannelEditScreen(
-                    vm = vm,
-                    subId = entry.arguments?.getString("subId").orEmpty(),
-                    onBack = { nav.popBackStack() },
-                )
+                SettingsScreen(vm = vm, onBack = { nav.popBackStack() })
             }
         }
         SnackbarHost(

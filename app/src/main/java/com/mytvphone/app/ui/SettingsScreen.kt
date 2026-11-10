@@ -5,8 +5,6 @@
 
 package com.mytvphone.app.ui
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +22,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -49,51 +46,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mytvphone.app.MainViewModel
-import com.mytvphone.app.data.PlaylistParser
 import com.mytvphone.app.data.Subscription
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * 设置：只保留 2 个真正生效的开关与必要的订阅管理。
- * active 标记改由响应式的 settings 计算（旧代码直接读 ViewModel 快照，切换订阅后不刷新）。
+ * 设置页：只保留「导入 / 切换 / 刷新 / 删除订阅」与一个锁横屏开关。
+ * 频道编辑、单个频道添加、配置导出/恢复都已移除，入口收敛到最少。
+ *
+ * active 标记由响应式的 settings 计算（旧代码直接读 ViewModel 快照，切换订阅后不刷新）。
  */
 @Composable
-fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onEditChannels: (String) -> Unit) {
+fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val subs by vm.repo.subs.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    var addingChannel by remember { mutableStateOf(false) }
-
-    val createDoc = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"),
-    ) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        runCatching {
-            context.contentResolver.openOutputStream(uri)?.use {
-                it.write(vm.exportJson().toByteArray(Charsets.UTF_8))
-            } ?: error("无法写入文件")
-            vm.showToast("配置已导出")
-        }.onFailure { vm.showToast("导出失败：${it.message}") }
-    }
-
-    val openBackup = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
-        runCatching {
-            // 与直播源导入共用 10MB 上限：误选到视频等大文件时直接报错，不把整份读进内存
-            val json = context.contentResolver.openInputStream(uri)?.use {
-                PlaylistParser.decodeAuto(PlaylistParser.readBounded(it))
-            }
-            if (json != null) vm.importBackup(json) else vm.showToast("读取失败")
-        }.onFailure { vm.showToast("读取失败：${it.message}") }
-    }
 
     Scaffold(
         topBar = {
@@ -117,17 +87,10 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onEditChannels: (Strin
             item { SectionHeader("直播源") }
 
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { vm.showImportSheet() }) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("导入新源")
-                    }
-                    TextButton(onClick = { addingChannel = true }) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("添加单个频道")
-                    }
+                TextButton(onClick = { vm.showImportSheet() }) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("导入新源")
                 }
             }
 
@@ -150,21 +113,9 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onEditChannels: (Strin
                         (settings.activeSubId.isEmpty() && sub.id == subs.firstOrNull()?.id),
                     onSelect = { vm.setActiveSub(sub.id) },
                     onRefresh = { vm.refreshSubscription(sub.id) },
-                    onEdit = { onEditChannels(sub.id) },
                     onDelete = { vm.deleteSubscription(sub.id) },
                     modifier = Modifier.animateItem(),
                 )
-            }
-
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { createDoc.launch("mytv-backup.json") }) {
-                        Text("导出备份")
-                    }
-                    TextButton(onClick = { openBackup.launch(arrayOf("application/json", "*/*")) }) {
-                        Text("恢复备份")
-                    }
-                }
             }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
@@ -200,20 +151,6 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onEditChannels: (Strin
                 }
             }
         }
-    }
-
-    if (addingChannel) {
-        ChannelEditorDialog(
-            title = "添加单个频道",
-            initialName = "",
-            initialGroup = "",
-            initialUrls = emptyList(),
-            onDismiss = { addingChannel = false },
-            onConfirm = { name, group, urls ->
-                vm.addChannel(name, group, urls)
-                addingChannel = false
-            },
-        )
     }
 }
 
@@ -279,7 +216,6 @@ private fun SubscriptionCard(
     active: Boolean,
     onSelect: () -> Unit,
     onRefresh: () -> Unit,
-    onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -329,9 +265,6 @@ private fun SubscriptionCard(
                 IconButton(onClick = onRefresh) {
                     Icon(Icons.Default.Refresh, contentDescription = "刷新订阅")
                 }
-            }
-            IconButton(onClick = onEdit) {
-                Icon(Icons.Default.Edit, contentDescription = "编辑频道")
             }
             IconButton(onClick = { confirmDelete = true }) {
                 Icon(Icons.Default.Delete, contentDescription = "删除订阅")

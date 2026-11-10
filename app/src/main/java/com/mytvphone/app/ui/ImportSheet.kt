@@ -4,15 +4,8 @@ package com.mytvphone.app.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -54,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import com.mytvphone.app.MainViewModel
 import com.mytvphone.app.data.ParseResult
@@ -87,6 +81,7 @@ fun ImportSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val focus = LocalFocusManager.current
 
     var step by rememberSaveable { mutableStateOf(ImportStep.Choose) }
     var name by rememberSaveable { mutableStateOf("") }
@@ -100,15 +95,21 @@ fun ImportSheet(
     // 导入面板永远卡在「处理中…」且按钮禁用，无法继续操作
     var busy by remember { mutableStateOf(false) }
     var errorMsg by rememberSaveable { mutableStateOf<String?>(null) }
-    // 退出动画进行中 errorMsg 已置空，记住最后一条让淡出完整
-    var lastErrorMsg by rememberSaveable { mutableStateOf("") }
 
-    LaunchedEffect(errorMsg) { errorMsg?.let { lastErrorMsg = it } }
-
-    /** 先播完 sheet 的收起动画再移除组合；vm.hideImportSheet() 幂等，重复调用无害。 */
-    fun closeSheet() {
+    /**
+     * 收起面板，顺序很关键：
+     *  1) 先播完滑出动画，**期间不碰键盘**——若先收键盘，imePadding 归零会让卡片
+     *     在滑走前先"长高"一下，看起来就是抖一下；
+     *  2) 动画结束后再 clearFocus 收键盘（此时卡片已移出屏幕，键盘收起看不见）；
+     *  3) 最后才写库并移除组合，避免订阅/设置/频道三个流在动画第一帧同时刷新。
+     *
+     * [afterHide] 在动画结束后、移除组合之前执行。
+     */
+    fun closeSheet(afterHide: (() -> Unit)? = null) {
         scope.launch {
             sheetState.hide()
+            focus.clearFocus()
+            afterHide?.invoke()
             onDismiss()
         }
     }
@@ -178,159 +179,154 @@ fun ImportSheet(
     }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        // 下滑 / 点遮罩关闭也走同一条路径：先播完收起动画再从组合里移除，
+        // 避免动画播到一半整个 sheet 被摘掉造成的「闪一下」
+        onDismissRequest = { closeSheet() },
         sheetState = sheetState,
     ) {
-        // AnimatedContent 的 content 只有一个根 Column：既能让页面内元素纵向排列，
-        // 又能让整页（含高度）参与淡入淡出，切换时不再生硬跳变。
-        AnimatedContent(
-            targetState = step,
-            transitionSpec = {
-                fadeIn(tween(210, delayMillis = 50, easing = FastOutSlowInEasing))
-                    .togetherWith(fadeOut(tween(110, easing = FastOutLinearInEasing)))
-                    .using(SizeTransform(clip = false))
-            },
-            label = "ImportStep",
-        ) { target ->
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .imePadding()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 20.dp)
-                    .padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                when (target) {
-                    ImportStep.Choose -> ChoosePage(
-                        busy = busy,
-                        onFile = {
-                            errorMsg = null
-                            openDoc.launch(arrayOf("*/*"))
-                        },
-                        onPaste = { errorMsg = null; step = ImportStep.Paste },
-                        onUrl = { errorMsg = null; step = ImportStep.Url },
-                    )
-
-                    ImportStep.Paste -> InputPage(
-                        title = "粘贴文本",
-                        hint = "把 M3U 内容或「频道名,地址」粘贴到这里",
-                        text = pastedText,
-                        onTextChange = { pastedText = it },
-                        multiline = true,
-                        actionLabel = "解析并预览",
-                        busy = busy,
-                        onBack = ::backToChoose,
-                        onAction = {
-                            val input = pastedText
-                            // 解析可能处理数 MB 文本，放进 IO 协程，避免阻塞主线程
-                            scope.launch {
-                                busy = true
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // 只用 160ms 的透明度交叉淡化，不再对高度做 SizeTransform 插值：
+            // 高度动画每帧都要重新 measure 整块面板，与 sheet 自身的位移动画叠加，
+            // 就是「收起时掉帧」的主因。切页现在只有一层 alpha，成本可以忽略。
+            Crossfade(
+                targetState = step,
+                animationSpec = tween(160),
+                label = "ImportStep",
+            ) { target ->
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    when (target) {
+                        ImportStep.Choose -> ChoosePage(
+                            busy = busy,
+                            onFile = {
                                 errorMsg = null
-                                val r = withContext(Dispatchers.IO) { PlaylistParser.parse(input) }
-                                busy = false
-                                if (r.isEmpty) {
-                                    errorMsg = "未解析到可用频道（识别格式：${r.format}）"
-                                } else {
-                                    pendingSource = "粘贴导入"
-                                    pendingUrl = null
-                                    preview = r
-                                    step = ImportStep.Preview
-                                }
-                            }
-                        },
-                    )
+                                openDoc.launch(arrayOf("*/*"))
+                            },
+                            onPaste = { errorMsg = null; step = ImportStep.Paste },
+                            onUrl = { errorMsg = null; step = ImportStep.Url },
+                        )
 
-                    ImportStep.Url -> InputPage(
-                        title = "网络订阅 URL",
-                        hint = "https://example.com/list.m3u",
-                        text = urlText,
-                        onTextChange = { urlText = it },
-                        multiline = false,
-                        actionLabel = "拉取并预览",
-                        busy = busy,
-                        onBack = ::backToChoose,
-                        onAction = {
-                            val url = urlText.trim()
-                            if (!url.startsWith("http", ignoreCase = true)) {
-                                errorMsg = "请输入以 http/https 开头的地址"
-                            } else {
+                        ImportStep.Paste -> InputPage(
+                            title = "粘贴文本",
+                            hint = "把 M3U 内容或「频道名,地址」粘贴到这里",
+                            text = pastedText,
+                            onTextChange = { pastedText = it },
+                            multiline = true,
+                            actionLabel = "解析并预览",
+                            busy = busy,
+                            onBack = ::backToChoose,
+                            onAction = {
+                                val input = pastedText
+                                // 解析可能处理数 MB 文本，放进 IO 协程，避免阻塞主线程
                                 scope.launch {
                                     busy = true
                                     errorMsg = null
-                                    val fetched = vm.repo.fetch(url)
-                                    val bytes = fetched.getOrNull()
-                                    // 解码 + 解析是纯 CPU 操作，可能处理数 MB 文本，不能留在主线程
-                                    val parsed: Result<ParseResult> = if (bytes == null) {
-                                        Result.failure(
-                                            fetched.exceptionOrNull()
-                                                ?: IllegalStateException("拉取失败"),
-                                        )
-                                    } else {
-                                        runCatching {
-                                            withContext(Dispatchers.IO) {
-                                                PlaylistParser.parse(PlaylistParser.decodeAuto(bytes))
-                                            }
-                                        }
-                                    }
+                                    val r = withContext(Dispatchers.IO) { PlaylistParser.parse(input) }
                                     busy = false
-                                    parsed
-                                        .onSuccess { r ->
-                                            if (r.isEmpty) {
-                                                errorMsg = "未解析到可用频道（识别格式：${r.format}）"
-                                            } else {
-                                                name = name.ifBlank { "网络订阅" }
-                                                pendingSource = "网络订阅"
-                                                pendingUrl = url
-                                                preview = r
-                                                step = ImportStep.Preview
+                                    if (r.isEmpty) {
+                                        errorMsg = "未解析到可用频道（识别格式：${r.format}）"
+                                    } else {
+                                        pendingSource = "粘贴导入"
+                                        pendingUrl = null
+                                        preview = r
+                                        step = ImportStep.Preview
+                                    }
+                                }
+                            },
+                        )
+
+                        ImportStep.Url -> InputPage(
+                            title = "网络订阅 URL",
+                            hint = "https://example.com/list.m3u",
+                            text = urlText,
+                            onTextChange = { urlText = it },
+                            multiline = false,
+                            actionLabel = "拉取并预览",
+                            busy = busy,
+                            onBack = ::backToChoose,
+                            onAction = {
+                                val url = urlText.trim()
+                                if (!url.startsWith("http", ignoreCase = true)) {
+                                    errorMsg = "请输入以 http/https 开头的地址"
+                                } else {
+                                    scope.launch {
+                                        busy = true
+                                        errorMsg = null
+                                        val fetched = vm.repo.fetch(url)
+                                        val bytes = fetched.getOrNull()
+                                        // 解码 + 解析是纯 CPU 操作，可能处理数 MB 文本，不能留在主线程
+                                        val parsed: Result<ParseResult> = if (bytes == null) {
+                                            Result.failure(
+                                                fetched.exceptionOrNull()
+                                                    ?: IllegalStateException("拉取失败"),
+                                            )
+                                        } else {
+                                            runCatching {
+                                                withContext(Dispatchers.IO) {
+                                                    PlaylistParser.parse(PlaylistParser.decodeAuto(bytes))
+                                                }
                                             }
                                         }
-                                        .onFailure { e -> errorMsg = "拉取失败：${e.message}" }
+                                        busy = false
+                                        parsed
+                                            .onSuccess { r ->
+                                                if (r.isEmpty) {
+                                                    errorMsg = "未解析到可用频道（识别格式：${r.format}）"
+                                                } else {
+                                                    name = name.ifBlank { "网络订阅" }
+                                                    pendingSource = "网络订阅"
+                                                    pendingUrl = url
+                                                    preview = r
+                                                    step = ImportStep.Preview
+                                                }
+                                            }
+                                            .onFailure { e -> errorMsg = "拉取失败：${e.message}" }
+                                    }
                                 }
-                            }
-                        },
-                    )
+                            },
+                        )
 
-                    ImportStep.Preview -> {
-                        val r = preview
-                        if (r == null) {
-                            // 极端情况（进程恢复后预览丢失）：不在这里写状态，只给个返回入口
-                            Text("预览已失效，请重新选择导入方式。")
-                            FilledTonalButton(onClick = ::backToChoose) { Text("重新选择") }
-                        } else {
-                            PreviewPage(
-                                name = name,
-                                onNameChange = { name = it },
-                                result = r,
-                                onBack = ::backToChoose,
-                                onConfirm = {
-                                    vm.commitImport(name, pendingSource, r, pendingUrl)
-                                    closeSheet()
-                                },
-                            )
+                        ImportStep.Preview -> {
+                            val r = preview
+                            if (r == null) {
+                                // 极端情况（进程恢复后预览丢失）：只给返回入口，不在这里写状态
+                                Text("预览已失效，请重新选择导入方式。")
+                                FilledTonalButton(onClick = ::backToChoose) { Text("重新选择") }
+                            } else {
+                                PreviewPage(
+                                    name = name,
+                                    onNameChange = { name = it },
+                                    result = r,
+                                    onBack = ::backToChoose,
+                                    onConfirm = {
+                                        // 先让卡片滑走，再写库：避免订阅/设置/频道三个流
+                                        // 在动画第一帧同时刷新，导致收起卡顿
+                                        closeSheet {
+                                            vm.commitImport(name, pendingSource, r, pendingUrl)
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
+            }
 
-                AnimatedVisibility(
-                    visible = errorMsg != null,
-                    enter = fadeIn(tween(150)),
-                    exit = fadeOut(tween(120)),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = errorMsg ?: lastErrorMsg,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
+            // 错误提示直接出现即可：为一个单行文字加淡入淡出，反而多一层动画与重排
+            if (errorMsg != null) {
+                Text(
+                    text = errorMsg.orEmpty(),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
     }

@@ -12,8 +12,8 @@ android {
         applicationId = "com.mytvphone.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.2.6"
+        versionCode = 9
+        versionName = "1.2.7"
     }
 
     buildTypes {
