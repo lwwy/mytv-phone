@@ -14,6 +14,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.mytvphone.app.data.Channel
 import com.mytvphone.app.data.DEFAULT_USER_AGENT
+import com.mytvphone.app.util.AppLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,7 +80,15 @@ class PlayerController(context: Context) {
     }
 
     fun play(channel: Channel) {
-        if (channel.urls.isEmpty()) return
+        if (channel.urls.isEmpty()) {
+            AppLog.w(TAG, "播放被忽略 · 频道「${channel.name}」没有可用地址")
+            return
+        }
+        AppLog.i(
+            TAG,
+            "开始播放 · ${channel.name} / ${channel.group} · ${channel.urls.size} 个源 · " +
+                "首选 ${AppLog.redact(channel.urls.first())}",
+        )
         current = channel
         urlIndex = 0
         typeIndex = -1
@@ -95,6 +104,11 @@ class PlayerController(context: Context) {
     private fun startCurrent() {
         val ch = current ?: return
         val url = ch.urls.getOrNull(urlIndex) ?: return
+        AppLog.d(
+            TAG,
+            "尝试播放 · ${ch.name} · 源[${urlIndex + 1}/${ch.urls.size}] · " +
+                "类型=${if (typeIndex < 0) "自动探测" else forcedTypes[typeIndex]} · ${AppLog.redact(url)}",
+        )
 
         val headers = HashMap<String, String>()
         headers["User-Agent"] = DEFAULT_USER_AGENT
@@ -137,6 +151,14 @@ class PlayerController(context: Context) {
 
     private fun handleError(error: PlaybackException) {
         val ch = current ?: return
+        val url = ch.urls.getOrNull(urlIndex)
+        AppLog.w(
+            TAG,
+            "播放出错 · ${ch.name} · 源[${urlIndex + 1}/${ch.urls.size}] · " +
+                "类型=${if (typeIndex < 0) "自动探测" else forcedTypes[typeIndex]} · " +
+                "${error.errorCodeName} · ${error.message} · ${AppLog.redact(url)}",
+            error,
+        )
         // 依次换解码方式，全都不行再换频道的备用地址；startCurrent 会把 error 清空
         if (typeIndex < forcedTypes.lastIndex) {
             typeIndex++
@@ -149,6 +171,7 @@ class PlayerController(context: Context) {
             startCurrent()
             return
         }
+        AppLog.e(TAG, "全部源与格式均失败 · ${ch.name} · ${describeError(error)}")
         _state.value = _state.value.copy(
             error = describeError(error),
             buffering = false,
@@ -197,5 +220,9 @@ class PlayerController(context: Context) {
 
     fun release() {
         player.release()
+    }
+
+    private companion object {
+        const val TAG = "PlayerController"
     }
 }

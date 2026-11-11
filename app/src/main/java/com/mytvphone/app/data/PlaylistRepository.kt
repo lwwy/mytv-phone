@@ -1,7 +1,7 @@
 package com.mytvphone.app.data
 
 import android.content.Context
-import android.util.Log
+import com.mytvphone.app.util.AppLog
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.CoroutineScope
@@ -68,17 +68,21 @@ class PlaylistRepository(private val context: Context) {
     suspend fun load(): String? = withContext(Dispatchers.IO) {
         try {
             // 文件不存在（首次启动）视为空列表；存在但损坏则抛异常进入下方备份逻辑
-            _subs.value = readSubscriptions(store, gson) ?: emptyList()
+            val read = readSubscriptions(store, gson) ?: emptyList()
+            _subs.value = read
+            AppLog.i(TAG, "载入订阅成功 · ${read.size} 份订阅 / ${read.sumOf { it.channels.size }} 个频道")
             null
         } catch (e: Exception) {
-            Log.w(TAG, "读取本地订阅失败", e)
+            AppLog.e(TAG, "读取本地订阅失败，尝试备份恢复", e)
             if (store.exists()) runCatching { store.copyTo(corrupt, overwrite = true) }
             // 仅当 .bak 真实存在时才尝试恢复，避免把「无备份」误报成「已从备份恢复」
             val recovered = if (bak.exists()) runCatching { readSubscriptions(bak, gson) }.getOrNull() else null
             if (recovered != null) {
                 _subs.value = recovered
+                AppLog.w(TAG, "已从 .bak 恢复 ${recovered.size} 份订阅")
                 return@withContext "订阅文件损坏，已从备份恢复"
             }
+            AppLog.w(TAG, "无可用备份，保留内存列表")
             // 无法恢复：保留当前内存列表（不主动清空），仅向上层返回错误提示
             "读取本地订阅失败：${e.message}（已保留原文件副本）"
         }
@@ -101,7 +105,8 @@ class PlaylistRepository(private val context: Context) {
 
     /** 网络订阅拉取（返回原始字节，交给 PlaylistParser 做 UTF-8 / GBK 识别）。 */
     suspend fun fetch(url: String): Result<ByteArray> = withContext(Dispatchers.IO) {
-        runCatching {
+        AppLog.i(TAG, "拉取订阅 · ${AppLog.redact(url)}")
+        val result = runCatching {
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", DEFAULT_USER_AGENT)
@@ -117,6 +122,10 @@ class PlaylistRepository(private val context: Context) {
                 PlaylistParser.readBounded(body.byteStream(), PlaylistParser.MAX_SOURCE_BYTES)
             }
         }
+        result
+            .onSuccess { AppLog.i(TAG, "拉取成功 · ${it.size} 字节 · ${AppLog.redact(url)}") }
+            .onFailure { AppLog.w(TAG, "拉取失败 · ${it.message} · ${AppLog.redact(url)}", it) }
+        result
     }
 
     /**
@@ -149,7 +158,7 @@ class PlaylistRepository(private val context: Context) {
 
     /** 落盘失败：日志 + 通知 UI。内存列表保持不变，避免 UI 与磁盘出现两种「现实」。 */
     private fun fail(reason: String) {
-        Log.w(TAG, "保存订阅失败：$reason")
+        AppLog.e(TAG, "保存订阅失败：$reason")
         _writeErrors.trySend("订阅已更新，但保存到本地失败（$reason），重启后可能丢失")
     }
 

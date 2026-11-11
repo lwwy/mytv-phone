@@ -12,6 +12,7 @@ import com.mytvphone.app.data.PlaylistRepository
 import com.mytvphone.app.data.Prefs
 import com.mytvphone.app.data.Subscription
 import com.mytvphone.app.player.PlayerController
+import com.mytvphone.app.util.AppLog
 import kotlinx.coroutines.channels.Channel as EventChannel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,11 +50,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
-            repo.load()?.let { showToast(it) }
+            repo.load()?.let {
+                AppLog.w("MainViewModel", "载入订阅异常：$it")
+                showToast(it)
+            }
         }
         // 写盘失败等异步错误统一走 Snackbar（导入/刷新已先提示成功，这里补真实结果）
         viewModelScope.launch {
-            repo.writeErrors.collect { showToast(it) }
+            repo.writeErrors.collect {
+                AppLog.w("MainViewModel", "写盘失败通知：$it")
+                showToast(it)
+            }
         }
         // 设置 + 订阅合并成单一来源，避免两个流各自刷新造成竞态
         viewModelScope.launch {
@@ -68,7 +75,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setActiveSub(id: String) = viewModelScope.launch {
         prefs.setActiveSub(id)
-        showToast("已切换到：${repo.get(id)?.name ?: ""}")
+        val name = repo.get(id)?.name ?: ""
+        AppLog.i("MainViewModel", "切换订阅 · id=$id · name=$name")
+        showToast("已切换到：$name")
     }
 
     /**
@@ -78,10 +87,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun commitImport(name: String, source: String, channels: List<Channel>, url: String? = null) {
         if (channels.isEmpty()) {
+            AppLog.w("MainViewModel", "导入被忽略 · 剔除后无保留频道 · source=$source")
             showToast("没有可导入的频道，未导入")
             return
         }
         val groupCount = channels.map { it.group }.toSet().size
+        AppLog.i(
+            "MainViewModel",
+            "提交导入 · name=$name · source=$source · ${channels.size} 个频道 / $groupCount 个分组 · " +
+                "订阅地址=${AppLog.redact(url)}",
+        )
         val sub = Subscription(
             id = UUID.randomUUID().toString(),
             name = name.ifBlank { "订阅 ${repo.subs.value.size + 1}" },
@@ -99,9 +114,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshSubscription(id: String) = viewModelScope.launch {
         val sub = repo.get(id) ?: return@launch
         val url = sub.url ?: run {
+            AppLog.w("MainViewModel", "刷新被忽略 · 本地文件订阅无在线地址 · ${sub.name}")
             showToast("该订阅来自本地文件，无法在线刷新")
             return@launch
         }
+        AppLog.i("MainViewModel", "刷新订阅 · ${sub.name} · ${AppLog.redact(url)}")
         showToast("正在更新订阅…")
         val bytes = repo.fetch(url)
         if (bytes.isFailure) {
@@ -114,8 +131,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             PlaylistParser.parse(PlaylistParser.decodeAuto(bytes.getOrThrow()))
         }
         if (result.isEmpty) {
+            AppLog.w("MainViewModel", "刷新未解析到频道 · ${sub.name} · format=${result.format}")
             showToast("更新失败：未解析到频道，已保留原列表")
         } else {
+            AppLog.i(
+                "MainViewModel",
+                "刷新成功 · ${sub.name} · format=${result.format} · ${result.channels.size} 个频道 · 跳过 ${result.skipped} 行",
+            )
             repo.replaceChannels(id, result.channels)
             showToast("已更新为 ${result.channels.size} 个频道")
         }
@@ -127,6 +149,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun deleteSubscription(id: String) {
         val wasActive = activeSubId() == id
+        AppLog.i("MainViewModel", "删除订阅 · id=$id · name=${repo.get(id)?.name} · 当前生效=$wasActive")
         repo.remove(id)
         if (wasActive) {
             viewModelScope.launch { prefs.setActiveSub(repo.subs.value.firstOrNull()?.id ?: "") }

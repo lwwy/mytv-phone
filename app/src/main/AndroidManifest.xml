@@ -15,6 +15,17 @@
         android:theme="@style/Theme.MyTvPhone"
         android:usesCleartextTraffic="true">
 
+        <!-- 导出诊断日志：以 content:// 授权给外部 App 读取，不暴露整个私有目录 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode"

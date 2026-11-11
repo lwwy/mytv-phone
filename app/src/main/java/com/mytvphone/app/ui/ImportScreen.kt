@@ -17,6 +17,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -70,14 +72,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mytvphone.app.MainViewModel
 import com.mytvphone.app.data.Channel
 import com.mytvphone.app.data.ChannelProbe
 import com.mytvphone.app.data.ParseResult
 import com.mytvphone.app.data.PlaylistParser
+import com.mytvphone.app.util.AppLog
 import com.mytvphone.app.util.resolveDisplayName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -162,7 +167,12 @@ fun ImportScreen(
             pendingSource = "外部分享 / 打开方式"
             pendingUrl = null
             val r = withContext(Dispatchers.IO) { PlaylistParser.parse(initial.second) }
+            AppLog.i(
+                "Import",
+                "外部分享解析 · format=${r.format} · ${r.channels.size} 个频道 · 跳过 ${r.skipped} 行",
+            )
             if (r.isEmpty) {
+                AppLog.w("Import", "外部分享未解析到频道 · 已回退到粘贴页")
                 errorMsg = "未解析到可用频道（识别格式：${r.format}）"
                 step = ImportStep.Paste
             } else {
@@ -190,10 +200,16 @@ fun ImportScreen(
             }
             busy = false
             if (result == null) {
+                AppLog.w("Import", "本地文件读取失败或为空 · uri=${AppLog.redact(uri.toString())}")
                 errorMsg = "读取文件失败或文件为空"
                 return@launch
             }
+            AppLog.i(
+                "Import",
+                "本地文件解析 · format=${result.format} · ${result.channels.size} 个频道 · 跳过 ${result.skipped} 行",
+            )
             if (result.isEmpty) {
+                AppLog.w("Import", "本地文件未解析到频道")
                 errorMsg = "未解析到可用频道（识别格式：${result.format}）"
                 return@launch
             }
@@ -319,6 +335,10 @@ fun ImportScreen(
                                             PlaylistParser.parse(input)
                                         }
                                         busy = false
+                                        AppLog.i(
+                                            "Import",
+                                            "粘贴文本解析 · format=${r.format} · ${r.channels.size} 个频道 · 跳过 ${r.skipped} 行",
+                                        )
                                         if (r.isEmpty) {
                                             errorMsg = "未解析到可用频道（识别格式：${r.format}）"
                                         } else {
@@ -367,6 +387,10 @@ fun ImportScreen(
                                             busy = false
                                             parsed
                                                 .onSuccess { r ->
+                                                    AppLog.i(
+                                                        "Import",
+                                                        "网络订阅解析 · format=${r.format} · ${r.channels.size} 个频道 · 跳过 ${r.skipped} 行",
+                                                    )
                                                     if (r.isEmpty) {
                                                         errorMsg = "未解析到可用频道（识别格式：${r.format}）"
                                                     } else {
@@ -378,6 +402,7 @@ fun ImportScreen(
                                                     }
                                                 }
                                                 .onFailure { e ->
+                                                    AppLog.w("Import", "网络订阅拉取/解析失败：${e.message}", e)
                                                     errorMsg = "拉取失败：${e.message}"
                                                 }
                                         }
@@ -611,29 +636,23 @@ private fun PreviewPage(
     var query by rememberSaveable { mutableStateOf("") }
     // 默认全保留：初始为全部键。关掉某个 = 从 kept 移除
     var kept by remember { mutableStateOf(allKeys.toSet()) }
-    // 只看不可达：仅展示探测后判定为不可达的频道
-    var onlyUnreachable by remember { mutableStateOf(false) }
 
     // 连通性探测结果：键 → 状态。点「检测连通性」后实时填充，默认全空
     val results = remember { mutableStateMapOf<String, ChannelProbe.Result>() }
     var probing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    // 搜索只影响展示，不改 kept 语义（keep 始终基于全量键）；
-    // 勾选「只看不可达」时再叠加过滤（仅保留探测结果为 FAIL 的频道）
-    val filtered = remember(rows, query, onlyUnreachable, results) {
-        val base = if (query.isBlank()) {
+    // 搜索只影响展示，不改 kept 语义（keep 始终基于全量键）。
+    // 关键：filtered/grouped 不依赖 results，避免探测每 tick 重算整张分组表、
+    // 触发整列表重排而掉帧；单条探测结果由各 item 自行读取，只重绘那一项。
+    val filtered = remember(rows, query) {
+        if (query.isBlank()) {
             rows
         } else {
             rows.filter { (ch, _) ->
                 ch.name.contains(query, ignoreCase = true) ||
                     ch.group.contains(query, ignoreCase = true)
             }
-        }
-        if (onlyUnreachable) {
-            base.filter { (_, key) -> results[key]?.status == ChannelProbe.Status.FAIL }
-        } else {
-            base
         }
     }
     val grouped = remember(filtered) { filtered.groupBy({ it.first.group }, { it }) }
@@ -649,11 +668,16 @@ private fun PreviewPage(
         if (probing) return
         probing = true
         results.clear()
+        AppLog.i("Import", "开始连通性探测 · ${rows.size} 个频道 · 并发 ${ChannelProbe.CONCURRENCY}")
         scope.launch {
             try {
                 ChannelProbe.probeAll(
                     rows.map { (ch, key) -> key to ch.urls.firstOrNull().orEmpty() },
                 ) { key, res -> results[key] = res }
+                val ok = results.values.count { it.status == ChannelProbe.Status.OK }
+                val fail = results.values.count { it.status == ChannelProbe.Status.FAIL }
+                val unknown = results.values.count { it.status == ChannelProbe.Status.UNKNOWN }
+                AppLog.i("Import", "探测完成 · 可达 $ok / 不可达 $fail / 未知 $unknown")
             } finally {
                 probing = false
             }
@@ -680,19 +704,15 @@ private fun PreviewPage(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        // 跨分组批量操作：剔除/保留/反选
+        // 跨分组批量操作：全选 / 反选 一一呼应
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FilledTonalButton(
-                onClick = { kept = emptySet() },
-                modifier = Modifier.weight(1f),
-            ) { Text("全部剔除") }
-            FilledTonalButton(
                 onClick = { kept = allKeys.toSet() },
                 modifier = Modifier.weight(1f),
-            ) { Text("全部保留") }
+            ) { Text("全选") }
             FilledTonalButton(
                 onClick = { kept = allKeys.minus(kept).toSet() },
                 modifier = Modifier.weight(1f),
@@ -700,7 +720,7 @@ private fun PreviewPage(
         }
 
         // 连通性探测工具条：点「检测连通性」对每个频道首地址探活并测延迟；
-        // 探测完可「只看不可达」或一键「剔除不可达」，不用逐个打开试看
+        // 探测完可一键「剔除不可达」，不用逐个打开试看
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -708,19 +728,12 @@ private fun PreviewPage(
             Button(
                 onClick = ::runProbe,
                 enabled = !probing,
+                modifier = Modifier.weight(1f),
             ) {
                 Text(
                     if (probing) "检测中 ${results.size}/${rows.size}" else "检测连通性",
                 )
             }
-            if (results.isNotEmpty()) {
-                FilledTonalButton(
-                    onClick = { onlyUnreachable = !onlyUnreachable },
-                ) {
-                    Text(if (onlyUnreachable) "显示全部" else "只看不可达 ($unreachableCount)")
-                }
-            }
-            Spacer(Modifier.weight(1f))
             if (unreachableCount > 0) {
                 FilledTonalButton(
                     onClick = {
@@ -787,7 +800,11 @@ private fun PreviewPage(
                     }
                 }
 
-                items(list, key = { it.second }) { (ch, key) ->
+                items(
+                    list,
+                    key = { it.second },
+                    contentType = { "channel" },
+                ) { (ch, key) ->
                     val isKept = key in kept
                     // 连通性探测状态：可达显示延迟、不可达标红、未知协议标灰、检测中提示
                     val probe = results[key]
@@ -800,41 +817,54 @@ private fun PreviewPage(
                             "不可达" to MaterialTheme.colorScheme.error
                         else -> "未知" to MaterialTheme.colorScheme.onSurfaceVariant
                     }
-                    ListItem(
-                        headlineContent = {
-                            Text(ch.name, style = MaterialTheme.typography.bodyMedium)
-                        },
-                        supportingContent = {
+                    // 用轻量 Row 替代 ListItem：减少每项测量/布局开销，长列表滑动更顺。
+                    // 背景块复用 surfaceContainerLow，固定最小高度 56dp 保持点击区域。
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 56.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                            .clickable {
+                                kept = if (isKept) kept - key else kept + key
+                            }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp),
+                        ) {
+                            Text(
+                                ch.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                             Text(
                                 "${ch.group} · ${ch.urls.size} 个源",
                                 style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
-                        },
-                        trailingContent = {
-                            Column(horizontalAlignment = Alignment.End) {
-                                if (statusText.isNotEmpty()) {
-                                    Text(
-                                        statusText,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = statusColor,
-                                    )
-                                    Spacer(Modifier.size(2.dp))
-                                }
-                                Checkbox(
-                                    checked = isKept,
-                                    onCheckedChange = null,
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            if (statusText.isNotEmpty()) {
+                                Text(
+                                    statusText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = statusColor,
                                 )
+                                Spacer(Modifier.size(2.dp))
                             }
-                        },
-                        colors = ListItemDefaults.colors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                kept = if (isKept) kept - key else kept + key
-                            },
-                    )
+                            Checkbox(
+                                checked = isKept,
+                                onCheckedChange = null,
+                            )
+                        }
+                    }
                 }
             }
         }

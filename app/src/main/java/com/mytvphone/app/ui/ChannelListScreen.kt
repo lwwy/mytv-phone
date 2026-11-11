@@ -5,7 +5,6 @@ package com.mytvphone.app.ui
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,17 +37,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImagePainter
-import coil.compose.SubcomposeAsyncImage
-import coil.compose.SubcomposeAsyncImageContent
-import coil.request.ImageRequest
 import com.mytvphone.app.MainViewModel
 import com.mytvphone.app.data.Channel
 
@@ -162,8 +158,15 @@ fun ChannelListScreen(
                     }
                 }
             } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(filtered, key = { it.id }) { ch ->
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    // 稳定的 contentType 让滚出/滚入的同类型 item 复用组合，减少测量与重建
+                ) {
+                    items(
+                        filtered,
+                        key = { it.id },
+                        contentType = { "channel" },
+                    ) { ch ->
                         ChannelRow(
                             ch = ch,
                             onPlay = { onPlay(ch) },
@@ -207,66 +210,62 @@ private fun ChannelRow(
 }
 
 /**
- * 频道台标：有 tvg-logo 就加载，否则用频道首字作占位。
+ * 频道台标：**品牌蓝实心方块 + 白色频道简称**，完全不依赖网络 logo。
  *
- * 优化点（之前看不清的根因）：
- *  - 尺寸从 42dp 放大到 52dp，细线条文字在小尺寸下会糊成一片；
- *  - 加一圈描边，把台标从浅色页面背景里「框」出来，低对比 logo 也能看清边界；
- *  - 用 [SubcomposeAsyncImage]：加载中 / 失败不再留一块空瓷砖，而是回退到首字占位，
- *    并开启 crossfade，避免半截模糊图一闪而过。
+ * 为什么弃用 tvg-logo：这些台标大多是白/浅灰底的不透明图片，Fit 铺满方块后会把
+ * 底色整个盖住，于是「改底色看不出变化」「对比不够、看不清」——截图里那块浅灰
+ * 其实一直就是图片自带的底，不是 App 画的底色。改成纯色块 + 文字后：
+ *  - 品牌蓝 100% 可见，白页面上的对比拉满；
+ *  - 白字简称（CCTV5 / CCTV12 / CGTN / 湖南…）统一、清晰、够大；
+ *  - 不再有图片加载 / 解码 / 重组重启请求，长列表（400+ 频道）滑动更顺。
  */
 @Composable
 private fun ChannelAvatar(ch: Channel) {
     val shape = MaterialTheme.shapes.small
-    val tileModifier = Modifier
-        .size(52.dp)
-        .clip(shape)
-        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
-
-    if (ch.logo.isNotEmpty()) {
-        SubcomposeAsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(ch.logo)
-                .crossfade(true)
-                .build(),
-            contentDescription = null,
-            modifier = tileModifier,
-            contentScale = ContentScale.Fit,
-            // transform 仅用于从「带 loading/error 槽位的重载」中唯一锁定本重载，
-            // 避免与同名重载产生歧义；内容绘制交给下面的 content 按状态切换
-            transform = { it },
-            content = {
-                when (painter.state) {
-                    is AsyncImagePainter.State.Loading,
-                    is AsyncImagePainter.State.Error,
-                    -> FirstCharFallback(ch)
-
-                    else -> SubcomposeAsyncImageContent()
-                }
-            },
+    val label = remember(ch.name, ch.title) { shortLabel(ch) }
+    // 简称越长字号越小，保证单行塞进 52dp 方块且尽量大
+    val fontSize = when (label.length) {
+        in 0..2 -> 20.sp
+        in 3..4 -> 15.sp
+        in 5..6 -> 12.sp
+        else -> 10.sp
+    }
+    Box(
+        modifier = Modifier
+            .size(52.dp)
+            .background(MaterialTheme.colorScheme.primary, shape)
+            .padding(horizontal = 3.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = MaterialTheme.colorScheme.onPrimary,
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontSize = fontSize,
+                fontWeight = FontWeight.Bold,
+            ),
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
         )
-    } else {
-        // 无 logo：用彩色占位块（primaryContainer），与有 logo 的中性块区分开
-        Box(
-            modifier = Modifier
-                .size(52.dp)
-                .clip(shape)
-                .background(MaterialTheme.colorScheme.primaryContainer)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape),
-            contentAlignment = Alignment.Center,
-        ) {
-            FirstCharFallback(ch)
-        }
     }
 }
 
-/** 首字占位：无 logo 或 logo 加载失败时显示，保证每一行左侧都有可辨识的内容。 */
-@Composable
-private fun FirstCharFallback(ch: Channel) {
-    Text(
-        text = ch.name.take(1),
-        color = MaterialTheme.colorScheme.onPrimaryContainer,
-        style = MaterialTheme.typography.titleMedium,
-    )
+/** 尾部画质后缀 / 空格，提取简称前先剥掉，避免「CCTV5 高清」被算成长字符串。 */
+private val QUALITY_SUFFIX =
+    Regex("(?i)(高清|超清|蓝光|标清|HD|FHD|UHD|4K|8K|1080p?|720p?|[\\s-])+$")
+
+/** 名称开头的 ASCII 字母数字（含 +），如 CCTV5、CCTV5+、CGTN。 */
+private val ASCII_HEAD = Regex("^[A-Za-z0-9+]+")
+
+/** 从频道名提取简短台标：优先 ASCII 主标识，纯中文则取前两字。 */
+private fun shortLabel(ch: Channel): String {
+    val raw = ch.title.ifEmpty { ch.name }.trim()
+    val cleaned = raw.replace(QUALITY_SUFFIX, "").trim()
+    val base = cleaned.ifEmpty { raw }
+    val ascii = ASCII_HEAD.find(base)?.value
+    return when {
+        ascii != null && ascii.length >= 2 -> ascii.take(7)
+        else -> base.take(2).ifEmpty { "TV" }
+    }
 }

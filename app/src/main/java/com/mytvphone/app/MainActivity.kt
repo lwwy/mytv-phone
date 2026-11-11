@@ -15,6 +15,7 @@ import androidx.media3.common.util.UnstableApi
 import com.mytvphone.app.data.PlaylistParser
 import com.mytvphone.app.ui.AppNav
 import com.mytvphone.app.ui.MyTvPhoneTheme
+import com.mytvphone.app.util.AppLog
 import com.mytvphone.app.util.resolveDisplayName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -28,6 +29,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 尽早初始化：崩溃捕获与设备信息头要在任何业务逻辑之前就位
+        AppLog.init(this)
         enableEdgeToEdge()
         setContent {
             val settings by vm.settings.collectAsStateWithLifecycle()
@@ -56,6 +59,7 @@ class MainActivity : ComponentActivity() {
     /** 支持「分享纯文本」与「用其他应用打开 .m3u/.txt」两种导入入口。 */
     private fun handleIntent(intent: Intent?) {
         intent ?: return
+        AppLog.i("Main", "handleIntent · action=${intent.action} · data=${AppLog.redact(intent.data?.toString())}")
         when (intent.action) {
             Intent.ACTION_SEND -> {
                 val text = intent.getStringExtra(Intent.EXTRA_TEXT)
@@ -87,8 +91,10 @@ class MainActivity : ComponentActivity() {
                 }.getOrNull()
             }
             if (text.isNullOrBlank()) {
+                AppLog.w("Main", "外部分享读取失败 · label=$label · uri=${AppLog.redact(uri.toString())}")
                 vm.showToast("读取文件失败：$label")
             } else {
+                AppLog.i("Main", "外部分享读取成功 · label=$label · ${text.length} 字符")
                 vm.setExternalImport(resolveDisplayName(this@MainActivity, uri) ?: label, text)
             }
         }

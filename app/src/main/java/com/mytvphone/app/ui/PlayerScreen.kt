@@ -53,6 +53,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -105,8 +106,8 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
     val channels by vm.channels.collectAsStateWithLifecycle()
 
     var showChannelPanel by remember { mutableStateOf(false) }
-    // 每次面板内交互自增，用来重置 5 秒自动隐藏计时
-    var panelTick by remember { mutableStateOf(0) }
+    // 每次面板内交互自增，用来重置自动隐藏计时；用 mutableIntStateOf 避免每次写入装箱
+    var panelTick by remember { mutableIntStateOf(0) }
     var lastError by remember { mutableStateOf("") }
 
     val err = st.error
