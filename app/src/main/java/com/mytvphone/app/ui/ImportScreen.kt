@@ -65,6 +65,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -525,11 +526,17 @@ private fun InputPage(
             enabled = !busy && text.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            if (busy) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(8.dp))
-                Text("处理中…")
-            } else {
+        if (busy) {
+            // 按钮容器是 primary，指示器默认也是 primary 会隐形；
+            // 改用 LocalContentColor（即按钮的 onPrimary）才看得清（P0 #3）
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                color = LocalContentColor.current,
+                strokeWidth = 2.dp,
+            )
+            Spacer(Modifier.size(8.dp))
+            Text("处理中…")
+        } else {
                 Text(actionLabel)
             }
         }

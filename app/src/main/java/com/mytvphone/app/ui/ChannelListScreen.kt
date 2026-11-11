@@ -5,6 +5,7 @@ package com.mytvphone.app.ui
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +43,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
+import coil.compose.SubcomposeAsyncImage
+import coil.compose.SubcomposeAsyncImageContent
+import coil.request.ImageRequest
 import com.mytvphone.app.MainViewModel
 import com.mytvphone.app.data.Channel
 
@@ -186,32 +190,67 @@ private fun ChannelRow(
     )
 }
 
-/** 有 tvg-logo 就加载，否则用频道首字作占位，不再需要「显示台标」开关。 */
+/**
+ * 频道台标：有 tvg-logo 就加载，否则用频道首字作占位。
+ *
+ * 优化点（之前看不清的根因）：
+ *  - 尺寸从 42dp 放大到 52dp，细线条文字在小尺寸下会糊成一片；
+ *  - 加一圈描边，把台标从浅色页面背景里「框」出来，低对比 logo 也能看清边界；
+ *  - 用 [SubcomposeAsyncImage]：加载中 / 失败不再留一块空瓷砖，而是回退到首字占位，
+ *    并开启 crossfade，避免半截模糊图一闪而过。
+ */
 @Composable
 private fun ChannelAvatar(ch: Channel) {
+    val shape = MaterialTheme.shapes.small
+    val tileModifier = Modifier
+        .size(52.dp)
+        .clip(shape)
+        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+
     if (ch.logo.isNotEmpty()) {
-        AsyncImage(
-            model = ch.logo,
+        SubcomposeAsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(ch.logo)
+                .crossfade(true)
+                .build(),
             contentDescription = null,
-            modifier = Modifier
-                .size(42.dp)
-                .clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            modifier = tileModifier,
             contentScale = ContentScale.Fit,
+            // transform 仅用于从「带 loading/error 槽位的重载」中唯一锁定本重载，
+            // 避免与同名重载产生歧义；内容绘制交给下面的 content 按状态切换
+            transform = { it },
+            content = {
+                when (painter.state) {
+                    is AsyncImagePainter.State.Loading,
+                    is AsyncImagePainter.State.Error,
+                    -> FirstCharFallback(ch)
+
+                    else -> SubcomposeAsyncImageContent()
+                }
+            },
         )
     } else {
+        // 无 logo：用彩色占位块（primaryContainer），与有 logo 的中性块区分开
         Box(
             modifier = Modifier
-                .size(42.dp)
-                .clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.primaryContainer),
+                .size(52.dp)
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.primaryContainer)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = ch.name.take(1),
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                style = MaterialTheme.typography.titleMedium,
-            )
+            FirstCharFallback(ch)
         }
     }
+}
+
+/** 首字占位：无 logo 或 logo 加载失败时显示，保证每一行左侧都有可辨识的内容。 */
+@Composable
+private fun FirstCharFallback(ch: Channel) {
+    Text(
+        text = ch.name.take(1),
+        color = MaterialTheme.colorScheme.onPrimaryContainer,
+        style = MaterialTheme.typography.titleMedium,
+    )
 }

@@ -13,6 +13,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -21,10 +22,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -40,6 +42,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -279,125 +282,135 @@ private fun ChannelPickerPanel(
             // 消费面板内的点击：既不会穿透到播放器关闭面板，也算作一次操作
             .pointerInput(Unit) { detectTapGestures(onTap = { onInteraction() }) },
     ) {
-        Column(
+        Surface(
             modifier = Modifier
                 .width(PANEL_WIDTH)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color(0xCC1C1C1E))
-                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
-                .padding(vertical = 14.dp),
+                .fillMaxHeight(),
+            shape = MaterialTheme.shapes.large,
+            // 让抽屉成为受主题管理的 Surface：颜色全部走角色，
+            // 浅色主题下不再是「深色硬写 + 主题 primary 文字」，对比度回到达标区间；
+            // 同时 Surface 自带与 contentColor 匹配的 ripple，按下可见反馈（P0 #1/#2）
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         ) {
-            Row(
-                modifier = Modifier.padding(start = 18.dp, end = 16.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(vertical = 14.dp),
             ) {
-                Text(
-                    text = "选台",
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Text(
-                    text = "  ${channels.size} 个频道",
-                    color = Color.White.copy(alpha = 0.45f),
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            }
-
-            Row(Modifier.weight(1f)) {
-                // 左侧分组：纯文字竖排
-                LazyColumn(
-                    modifier = Modifier
-                        .width(GROUP_RAIL_WIDTH)
-                        .fillMaxHeight(),
-                    contentPadding = PaddingValues(vertical = 4.dp),
+                Row(
+                    modifier = Modifier.padding(start = 18.dp, end = 16.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    items(groups) { g ->
-                        val active = g == selGroup
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    selGroup = g
-                                    onInteraction()
-                                }
-                                .padding(horizontal = 18.dp, vertical = 9.dp),
-                        ) {
-                            Text(
-                                text = g,
-                                color = if (active) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    Color.White.copy(alpha = 0.62f)
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (active) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(top = 6.dp)
-                                        .width(16.dp)
-                                        .height(2.dp)
-                                        .background(
-                                            MaterialTheme.colorScheme.primary,
-                                            RoundedCornerShape(1.dp),
-                                        ),
+                    Text(
+                        text = "选台",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Text(
+                        text = "  ${channels.size} 个频道",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+
+                Row(Modifier.weight(1f)) {
+                    // 左侧分组：纯文字竖排
+                    LazyColumn(
+                        modifier = Modifier
+                            .width(GROUP_RAIL_WIDTH)
+                            .fillMaxHeight(),
+                        contentPadding = PaddingValues(vertical = 4.dp),
+                    ) {
+                        items(groups) { g ->
+                            val active = g == selGroup
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .clickable {
+                                        selGroup = g
+                                        onInteraction()
+                                    }
+                                    .padding(horizontal = 18.dp, vertical = 9.dp),
+                            ) {
+                                Text(
+                                    text = g,
+                                    color = if (active) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
+                                if (active) {
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(top = 6.dp)
+                                            .width(16.dp)
+                                            .height(2.dp)
+                                            .background(
+                                                MaterialTheme.colorScheme.primary,
+                                                RoundedCornerShape(1.dp),
+                                            ),
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                // 右侧频道：圆角小卡片
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    contentPadding = PaddingValues(start = 2.dp, end = 14.dp, bottom = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    itemsIndexed(inGroup, key = { _, ch -> ch.id }) { _, ch ->
-                        val cur = ch.name == currentName && ch.group == currentGroup
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    if (cur) {
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                    // 右侧频道：圆角小卡片
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        contentPadding = PaddingValues(start = 2.dp, end = 14.dp, bottom = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        itemsIndexed(inGroup, key = { _, ch -> ch.id }) { _, ch ->
+                            val cur = ch.name == currentName && ch.group == currentGroup
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (cur) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            Color.Transparent
+                                        },
+                                    )
+                                    .clickable { onPick(ch) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = ch.title.ifEmpty { ch.name },
+                                    modifier = Modifier.weight(1f),
+                                    color = if (cur) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
                                     } else {
-                                        Color.White.copy(alpha = 0.04f)
-                                    }
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-                                .clickable { onPick(ch) }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = ch.title.ifEmpty { ch.name },
-                                modifier = Modifier.weight(1f),
-                                color = if (cur) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    Color.White.copy(alpha = 0.88f)
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (cur) {
-                                Icon(
-                                    Icons.Default.PlayArrow,
-                                    contentDescription = "正在播放",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier
-                                        .padding(start = 6.dp)
-                                        .size(16.dp),
-                                )
+                                if (cur) {
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        contentDescription = "正在播放",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier
+                                            .padding(start = 6.dp)
+                                            .size(20.dp),
+                                    )
+                                }
                             }
                         }
                     }
