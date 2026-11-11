@@ -1,11 +1,21 @@
 package com.mytvphone.app.ui
 
+import android.content.Context
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * Material 3 浅 / 深双色板，跟随系统。
@@ -15,7 +25,7 @@ import androidx.compose.ui.graphics.Color
  * 在播放页进出时造成状态栏颜色闪烁。
  */
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF3E6FA8),
+    primary = Color(0xFF35618F),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFD5E7FB),
     onPrimaryContainer = Color(0xFF0B2C4D),
@@ -86,13 +96,54 @@ private val DarkColors = darkColorScheme(
     inversePrimary = Color(0xFF3E6FA8),
 )
 
+/**
+ * 字阶沿用 Material 3 默认（字号不会错），只把中文容易偏紧的正文行高提到 1.5，
+ * 长句密排时不再吃力；其余角色保持 M3 基线。
+ */
+private val AppTypography = Typography().copy(
+    bodyMedium = Typography().bodyMedium.copy(lineHeight = 21.sp),
+    bodySmall = Typography().bodySmall.copy(lineHeight = 18.sp),
+    titleSmall = Typography().titleSmall.copy(lineHeight = 22.sp),
+)
+
+/**
+ * 收敛散落的硬编码圆角（抽屉 20dp / 卡片 10dp / 下划线 1dp 等）到 M3 的 5 档 shape 刻度。
+ * 组件统一引用 shapes.* 而不是写死数值，后续要调圆角只改这里。
+ */
+private val AppShapes = Shapes(
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(28.dp),
+)
+
 @Composable
 fun MyTvPhoneTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    val context = LocalContext.current
+    val colorScheme = resolveScheme(context, darkTheme, dynamicColor)
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = colorScheme,
+        typography = AppTypography,
+        shapes = AppShapes,
         content = content,
     )
+}
+
+@Composable
+private fun resolveScheme(
+    context: Context,
+    darkTheme: Boolean,
+    dynamicColor: Boolean,
+) = when {
+    // 动态取色（Material You）：Android 12+ 跟随壁纸生成色板；默认关闭以保留本应用
+    // 手工推导的品牌蓝——开启后整页配色会随系统壁纸变化。
+    dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+
+    darkTheme -> DarkColors
+    else -> LightColors
 }

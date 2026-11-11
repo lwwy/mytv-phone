@@ -23,6 +23,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 data class AppSettings(
     val activeSubId: String = "",
     val lockLandscape: Boolean = true,
+    val dynamicColor: Boolean = false,
 )
 
 class Prefs(private val context: Context) {
@@ -30,6 +31,7 @@ class Prefs(private val context: Context) {
     private object K {
         val ACTIVE = stringPreferencesKey("active_sub_id")
         val LOCK_LANDSCAPE = booleanPreferencesKey("lock_landscape")
+        val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data
@@ -38,10 +40,13 @@ class Prefs(private val context: Context) {
             AppSettings(
                 activeSubId = p[K.ACTIVE] ?: "",
                 lockLandscape = p[K.LOCK_LANDSCAPE] ?: true,
+                dynamicColor = p[K.DYNAMIC_COLOR] ?: false,
             )
         }
 
     suspend fun setActiveSub(id: String) = context.dataStore.edit { it[K.ACTIVE] = id }
 
     suspend fun setLockLandscape(v: Boolean) = context.dataStore.edit { it[K.LOCK_LANDSCAPE] = v }
+
+    suspend fun setDynamicColor(v: Boolean) = context.dataStore.edit { it[K.DYNAMIC_COLOR] = v }
 }

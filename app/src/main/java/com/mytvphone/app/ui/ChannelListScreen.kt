@@ -17,6 +17,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -109,7 +111,7 @@ fun ChannelListScreen(
                 .fillMaxSize(),
         ) {
             Text(
-                text = "${channels.size} 个频道",
+                text = "${filtered.size} 个频道",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
@@ -132,17 +134,31 @@ fun ChannelListScreen(
 
             if (filtered.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Tv,
+                            contentDescription = null,
+                            modifier = Modifier.size(56.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.size(12.dp))
                         Text(
                             text = "还没有直播源",
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Spacer(Modifier.size(8.dp))
                         Text(
-                            text = "在右上角「设置」里导入 M3U / TXT 文件、粘贴文本或网络订阅",
+                            text = "导入 M3U / TXT 文件、粘贴文本或网络订阅后，频道会显示在这里",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Spacer(Modifier.size(16.dp))
+                        Button(onClick = onSettings) {
+                            Text("导入直播源")
+                        }
                     }
                 }
             } else {

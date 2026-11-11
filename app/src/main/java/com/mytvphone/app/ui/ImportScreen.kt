@@ -5,15 +5,18 @@ package com.mytvphone.app.ui
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,6 +58,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -71,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mytvphone.app.MainViewModel
 import com.mytvphone.app.data.Channel
+import com.mytvphone.app.data.ChannelProbe
 import com.mytvphone.app.data.ParseResult
 import com.mytvphone.app.data.PlaylistParser
 import com.mytvphone.app.util.resolveDisplayName
@@ -267,12 +272,22 @@ fun ImportScreen(
                         .imePadding()
                         .padding(horizontal = 20.dp),
                 ) {
-                    // 只用 160ms 的透明度交叉淡化，不对高度做插值：
-                    // 高度动画每帧都要重新 measure 整块内容，是之前掉帧的来源之一
-                    Crossfade(
+                    // 分步表单用带方向的转场（前进向右滑入、返回向左滑回），让用户感知
+                    // 「自己在流程的哪一步」，不再是无方向的交叉淡化（P1 #17）。
+                    // 只做横向位移、不做高度插值，避免每帧重测整块内容掉帧。
+                    AnimatedContent(
                         targetState = step,
-                        animationSpec = tween(160),
                         modifier = Modifier.fillMaxSize(),
+                        transitionSpec = {
+                            val forward = targetState.ordinal >= initialState.ordinal
+                            val enter = slideInHorizontally(tween(220)) { w ->
+                                if (forward) w / 3 else -w / 3
+                            } + fadeIn(tween(180))
+                            val exit = slideOutHorizontally(tween(180)) { w ->
+                                if (forward) -w / 3 else w / 3
+                            } + fadeOut(tween(180))
+                            enter.togetherWith(exit)
+                        },
                         label = "ImportStep",
                     ) { target ->
                         when (target) {
@@ -293,6 +308,7 @@ fun ImportScreen(
                                 multiline = true,
                                 actionLabel = "解析并预览",
                                 busy = busy,
+                                error = errorMsg,
                                 onAction = {
                                     val input = pastedText
                                     // 解析可能处理数 MB 文本，放进 IO 协程，避免阻塞主线程
@@ -322,6 +338,7 @@ fun ImportScreen(
                                 multiline = false,
                                 actionLabel = "拉取并预览",
                                 busy = busy,
+                                error = errorMsg,
                                 onAction = {
                                     val url = urlText.trim()
                                     if (!url.startsWith("http", ignoreCase = true)) {
@@ -394,8 +411,9 @@ fun ImportScreen(
                         }
                     }
 
-                    // 错误提示浮在底部：直接出现即可，不必为单行文字加淡入淡出
-                    if (errorMsg != null) {
+                    // 错误提示：选择页（文件读取失败等）用底部浮层；输入页的错误已贴合到
+                    // 对应输入框下方（supportingText），这里不再重复展示
+                    if (errorMsg != null && step == ImportStep.Choose) {
                         Surface(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -501,6 +519,7 @@ private fun InputPage(
     multiline: Boolean,
     actionLabel: String,
     busy: Boolean,
+    error: String? = null,
     onAction: () -> Unit,
 ) {
     Column(
@@ -518,6 +537,12 @@ private fun InputPage(
             minLines = if (multiline) 10 else 1,
             maxLines = if (multiline) 16 else 1,
             enabled = !busy,
+            isError = error != null,
+            supportingText = if (error != null) {
+                { Text(error) }
+            } else {
+                null
+            },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -555,6 +580,8 @@ private fun InputPage(
  * - 默认全部保留（[kept] 初始为全部键）；点掉某个频道即标记为不导入。
  * - 顶部搜索框按「频道名 / 分组」实时过滤；分组标题带勾选框，可整组一键保留/剔除。
  * - 「全部剔除 / 全部保留 / 反选」做跨分组批量操作。
+ * - 可一键**检测所有频道首地址的连通性与延迟**：可达显示毫秒数、不可达标红、未知协议
+ *   （rtsp/rtmp 等）标灰；探测完可「只看不可达」或一键「剔除不可达」，不用逐个打开试看。
  * - 勾选状态用 [keyOf] 作稳定键（tvg-id 常为空，用「名称 + 首个地址」避免滚动/搜索重排后错位）。
  *   整页是内存态，关闭预览即丢弃，**不会**误改已保存的订阅。
  */
@@ -576,16 +603,29 @@ private fun PreviewPage(
     var query by rememberSaveable { mutableStateOf("") }
     // 默认全保留：初始为全部键。关掉某个 = 从 kept 移除
     var kept by remember { mutableStateOf(allKeys.toSet()) }
+    // 只看不可达：仅展示探测后判定为不可达的频道
+    var onlyUnreachable by remember { mutableStateOf(false) }
 
-    // 搜索只影响展示，不改 kept 语义（keep 始终基于全量键）
-    val filtered = remember(rows, query) {
-        if (query.isBlank()) {
+    // 连通性探测结果：键 → 状态。点「检测连通性」后实时填充，默认全空
+    val results = remember { mutableStateMapOf<String, ChannelProbe.Result>() }
+    var probing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // 搜索只影响展示，不改 kept 语义（keep 始终基于全量键）；
+    // 勾选「只看不可达」时再叠加过滤（仅保留探测结果为 FAIL 的频道）
+    val filtered = remember(rows, query, onlyUnreachable, results) {
+        val base = if (query.isBlank()) {
             rows
         } else {
             rows.filter { (ch, _) ->
                 ch.name.contains(query, ignoreCase = true) ||
                     ch.group.contains(query, ignoreCase = true)
             }
+        }
+        if (onlyUnreachable) {
+            base.filter { (_, key) -> results[key]?.status == ChannelProbe.Status.FAIL }
+        } else {
+            base
         }
     }
     val grouped = remember(filtered) { filtered.groupBy({ it.first.group }, { it }) }
@@ -594,6 +634,23 @@ private fun PreviewPage(
         rows.filter { it.second in kept }.map { it.first }
     }
     val excludedCount = allKeys.size - kept.size
+    val unreachableCount = results.values.count { it.status == ChannelProbe.Status.FAIL }
+
+    /** 并发探测所有频道首地址的可达性与延迟；结果写入 [results]，协程随预览页离开而取消。 */
+    fun runProbe() {
+        if (probing) return
+        probing = true
+        results.clear()
+        scope.launch {
+            try {
+                ChannelProbe.probeAll(
+                    rows.map { (ch, key) -> key to ch.urls.firstOrNull().orEmpty() },
+                ) { key, res -> results[key] = res }
+            } finally {
+                probing = false
+            }
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -632,6 +689,38 @@ private fun PreviewPage(
                 onClick = { kept = allKeys.minus(kept).toSet() },
                 modifier = Modifier.weight(1f),
             ) { Text("反选") }
+        }
+
+        // 连通性探测工具条：点「检测连通性」对每个频道首地址探活并测延迟；
+        // 探测完可「只看不可达」或一键「剔除不可达」，不用逐个打开试看
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Button(
+                onClick = ::runProbe,
+                enabled = !probing,
+            ) {
+                Text(
+                    if (probing) "检测中 ${results.size}/${rows.size}" else "检测连通性",
+                )
+            }
+            if (results.isNotEmpty()) {
+                FilledTonalButton(
+                    onClick = { onlyUnreachable = !onlyUnreachable },
+                ) {
+                    Text(if (onlyUnreachable) "显示全部" else "只看不可达 ($unreachableCount)")
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            if (unreachableCount > 0) {
+                FilledTonalButton(
+                    onClick = {
+                        val bad = results.filterValues { it.status == ChannelProbe.Status.FAIL }.keys
+                        kept = kept - bad
+                    },
+                ) { Text("剔除不可达") }
+            }
         }
 
         Text(
@@ -692,6 +781,17 @@ private fun PreviewPage(
 
                 items(list, key = { it.second }) { (ch, key) ->
                     val isKept = key in kept
+                    // 连通性探测状态：可达显示延迟、不可达标红、未知协议标灰、检测中提示
+                    val probe = results[key]
+                    val (statusText, statusColor) = when {
+                        probe == null ->
+                            (if (probing) "检测中" else "") to MaterialTheme.colorScheme.onSurfaceVariant
+                        probe.status == ChannelProbe.Status.OK ->
+                            "${probe.latencyMs}ms" to MaterialTheme.colorScheme.primary
+                        probe.status == ChannelProbe.Status.FAIL ->
+                            "不可达" to MaterialTheme.colorScheme.error
+                        else -> "未知" to MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                     ListItem(
                         headlineContent = {
                             Text(ch.name, style = MaterialTheme.typography.bodyMedium)
@@ -703,10 +803,20 @@ private fun PreviewPage(
                             )
                         },
                         trailingContent = {
-                            Checkbox(
-                                checked = isKept,
-                                onCheckedChange = null,
-                            )
+                            Column(horizontalAlignment = Alignment.End) {
+                                if (statusText.isNotEmpty()) {
+                                    Text(
+                                        statusText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = statusColor,
+                                    )
+                                    Spacer(Modifier.size(2.dp))
+                                }
+                                Checkbox(
+                                    checked = isKept,
+                                    onCheckedChange = null,
+                                )
+                            }
                         },
                         colors = ListItemDefaults.colors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,

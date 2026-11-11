@@ -57,6 +57,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -71,6 +72,8 @@ import androidx.media3.ui.PlayerView
 import com.mytvphone.app.MainViewModel
 import com.mytvphone.app.R
 import com.mytvphone.app.data.Channel
+import android.content.Context
+import android.view.accessibility.AccessibilityManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
@@ -95,6 +98,7 @@ private val UiFadeOut = fadeOut(tween(130, easing = FastOutLinearInEasing))
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
     val st by vm.controller.state.collectAsStateWithLifecycle()
     // 用可观察的 StateFlow：在播放页导入新源时抽屉里的列表会跟着刷新，
     // 直接读 vm.channels.value 只在重组时才取到新值，可能一直是旧列表。
@@ -120,10 +124,15 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
 
     LaunchedEffect(err) { if (err != null) lastError = err }
 
-    // 面板弹出后 5 秒无操作自动收起，回到纯净全屏
+    // 面板弹出后 8 秒无操作自动收起，回到纯净全屏。
+    // 读屏（TalkBack）用户还没听完频道名就可能被收起：检测到触摸探索开启时
+    // 不自动收起，避免 WCAG 2.2.1「时限可调」违规。分组点击 / 列表滚动 /
+    // 任意点击都会回调 onInteraction 自增 panelTick，重置计时（焦点移动也会续期）。
+    val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+    val touchExploration = am?.isTouchExplorationEnabled == true
     LaunchedEffect(showChannelPanel, panelTick) {
-        if (showChannelPanel) {
-            delay(5000)
+        if (showChannelPanel && !touchExploration) {
+            delay(8000)
             showChannelPanel = false
         }
     }
@@ -237,7 +246,7 @@ fun PlayerScreen(vm: MainViewModel, onBack: () -> Unit) {
  *  - 顶部留 72dp 安全区、四周留边距，避免遮住左上角台标与屏幕圆角/刘海；
  *  - 左侧分组改为纯文字竖排，选中项高亮加粗 + 底部小横线，没有数字色块；
  *  - 右侧频道改为圆角小卡片，选中项淡蓝半透明底 + 蓝色文字 + 小播放图标；
- *  - 组点击 / 列表滚动都会回调 [onInteraction]，用于重置 5 秒自动隐藏计时。
+ *  - 组点击 / 列表滚动都会回调 [onInteraction]，用于重置 8 秒自动隐藏计时。
  */
 @Composable
 private fun ChannelPickerPanel(

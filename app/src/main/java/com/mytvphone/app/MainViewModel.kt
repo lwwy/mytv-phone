@@ -151,6 +151,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setLockLandscape(v: Boolean) = viewModelScope.launch { prefs.setLockLandscape(v) }
 
+    fun setDynamicColor(v: Boolean) = viewModelScope.launch { prefs.setDynamicColor(v) }
+
     fun openImport() {
         _showImport.value = true
     }

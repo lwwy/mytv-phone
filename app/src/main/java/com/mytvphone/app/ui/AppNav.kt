@@ -3,10 +3,11 @@ package com.mytvphone.app.ui
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -37,14 +38,19 @@ object Routes {
 }
 
 /**
- * Material 3「fade through」页面转场：旧页先淡出、新页稍后淡入，
- * 不做位移与缩放，避免播放页视频画面被拉伸，也避免黑白底硬切造成闪屏。
+ * Material 3「fade through」页面转场：旧页先淡出（90ms），新页在 90ms 之后才启动淡入
+ * （210ms）并伴随 92%→100% 的微缩放，两段首尾相接、绝不重叠——避免出现旧实现里
+ * 110ms 双页半透明叠加的「重影」。
+ * 不做位移，避免播放页视频画面被拉伸，也避免黑白底硬切造成闪屏。
  */
 private val PageFadeIn = fadeIn(
-    animationSpec = tween(280, delayMillis = 50, easing = FastOutSlowInEasing),
+    animationSpec = tween(210, delayMillis = 90, easing = LinearOutSlowInEasing),
+) + scaleIn(
+    animationSpec = tween(210, delayMillis = 90, easing = LinearOutSlowInEasing),
+    initialScale = 0.92f,
 )
 private val PageFadeOut = fadeOut(
-    animationSpec = tween(160, easing = FastOutLinearInEasing),
+    animationSpec = tween(90, easing = FastOutLinearInEasing),
 )
 
 @Composable

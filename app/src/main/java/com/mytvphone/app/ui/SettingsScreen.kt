@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -131,6 +133,16 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 )
             }
 
+            item {
+                SwitchRow(
+                    title = "动态取色（跟随壁纸）",
+                    desc = "Android 12+ 跟随系统壁纸生成配色；关闭则使用品牌蓝",
+                    checked = settings.dynamicColor,
+                    onChange = { vm.setDynamicColor(it) },
+                    modifier = Modifier.animateItem(),
+                )
+            }
+
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
             item { SectionHeader("关于") }
             item {
@@ -204,9 +216,12 @@ private fun SwitchRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
-        trailingContent = { Switch(checked = checked, onCheckedChange = onChange) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null) },
         colors = ListItemDefaults.colors(containerColor = containerColor),
-        modifier = modifier.clip(MaterialTheme.shapes.medium),
+        // 整行都是触控目标（M3 要求列表项整行可点）：开关本身不单独响应，由行代理切换
+        modifier = modifier
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = { onChange(!checked) }),
     )
 }
 
@@ -278,10 +293,16 @@ private fun SubscriptionCard(
             title = { Text("删除订阅") },
             text = { Text("确定删除「${sub.name}」？此操作不可撤销。") },
             confirmButton = {
-                TextButton(onClick = {
-                    onDelete()
-                    confirmDelete = false
-                }) { Text("删除") }
+                TextButton(
+                    onClick = {
+                        onDelete()
+                        confirmDelete = false
+                    },
+                    // 破坏性操作：确认按钮用 error 色，而不是默认 primary，符合 M3 语义
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) { Text("删除") }
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = false }) { Text("取消") }

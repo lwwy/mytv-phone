@@ -8,6 +8,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.getValue
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import com.mytvphone.app.data.PlaylistParser
@@ -28,7 +30,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyTvPhoneTheme {
+            val settings by vm.settings.collectAsStateWithLifecycle()
+            MyTvPhoneTheme(dynamicColor = settings.dynamicColor) {
                 AppNav(vm = vm)
             }
         }
