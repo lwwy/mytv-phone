@@ -71,23 +71,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         showToast("已切换到：${repo.get(id)?.name ?: ""}")
     }
 
-    /** 预览确认后真正写入订阅。 */
-    fun commitImport(name: String, source: String, result: ParseResult, url: String? = null) {
-        if (result.isEmpty) {
-            showToast("没有解析到可用频道，未导入")
+    /**
+     * 预览确认后真正写入订阅。
+     * [channels] 是预览页**剔除后保留**的频道列表（已过滤掉用户不想要的），
+     * 不再接收整个 [ParseResult]，避免把被剔除的频道也写进去。
+     */
+    fun commitImport(name: String, source: String, channels: List<Channel>, url: String? = null) {
+        if (channels.isEmpty()) {
+            showToast("没有可导入的频道，未导入")
             return
         }
+        val groupCount = channels.map { it.group }.toSet().size
         val sub = Subscription(
             id = UUID.randomUUID().toString(),
             name = name.ifBlank { "订阅 ${repo.subs.value.size + 1}" },
             source = source,
             url = url,
             importedAt = System.currentTimeMillis(),
-            channels = result.channels,
+            channels = channels,
         )
         repo.add(sub)
         viewModelScope.launch { prefs.setActiveSub(sub.id) }
-        showToast("已导入 ${result.channels.size} 个频道 / ${result.groups.size} 个分组")
+        showToast("已导入 ${channels.size} 个频道 / $groupCount 个分组")
     }
 
     /** 网络订阅刷新：失败时保留上一次成功的频道列表。解析整体放入 IO，不卡主线程。 */

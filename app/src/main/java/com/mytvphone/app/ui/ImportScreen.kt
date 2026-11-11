@@ -16,7 +16,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +26,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -32,7 +36,9 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -42,6 +48,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -58,8 +65,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mytvphone.app.MainViewModel
+import com.mytvphone.app.data.Channel
 import com.mytvphone.app.data.ParseResult
 import com.mytvphone.app.data.PlaylistParser
 import com.mytvphone.app.util.resolveDisplayName
@@ -245,153 +255,160 @@ fun ImportScreen(
                     )
                 },
             ) { innerPadding ->
-                Column(
+                // Box 叠层：内容（Crossfade）铺满，错误提示浮在底部，避免再用 weight
+                // 在 modifier 作用域外取值导致解析到布局内部属性而编译失败
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
-                        // imePadding 放在 verticalScroll 外层：键盘弹出时收缩可视区，
+                        // imePadding 放在滚动层外层：键盘弹出时收缩可视区，
                         // 输入框可以滚到键盘上方，而不是被压在键盘下
                         .imePadding()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp)
-                        .padding(top = 8.dp, bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                        .padding(horizontal = 20.dp),
                 ) {
                     // 只用 160ms 的透明度交叉淡化，不对高度做插值：
                     // 高度动画每帧都要重新 measure 整块内容，是之前掉帧的来源之一
                     Crossfade(
                         targetState = step,
                         animationSpec = tween(160),
+                        modifier = Modifier.fillMaxSize(),
                         label = "ImportStep",
                     ) { target ->
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            when (target) {
-                                ImportStep.Choose -> ChoosePage(
-                                    busy = busy,
-                                    onFile = {
-                                        errorMsg = null
-                                        openDoc.launch(arrayOf("*/*"))
-                                    },
-                                    onPaste = { errorMsg = null; step = ImportStep.Paste },
-                                    onUrl = { errorMsg = null; step = ImportStep.Url },
-                                )
+                        when (target) {
+                            ImportStep.Choose -> ChoosePage(
+                                busy = busy,
+                                onFile = {
+                                    errorMsg = null
+                                    openDoc.launch(arrayOf("*/*"))
+                                },
+                                onPaste = { errorMsg = null; step = ImportStep.Paste },
+                                onUrl = { errorMsg = null; step = ImportStep.Url },
+                            )
 
-                                ImportStep.Paste -> InputPage(
-                                    hint = "把 M3U 内容或「频道名,地址」粘贴到这里",
-                                    text = pastedText,
-                                    onTextChange = { pastedText = it },
-                                    multiline = true,
-                                    actionLabel = "解析并预览",
-                                    busy = busy,
-                                    onAction = {
-                                        val input = pastedText
-                                        // 解析可能处理数 MB 文本，放进 IO 协程，避免阻塞主线程
+                            ImportStep.Paste -> InputPage(
+                                hint = "把 M3U 内容或「频道名,地址」粘贴到这里",
+                                text = pastedText,
+                                onTextChange = { pastedText = it },
+                                multiline = true,
+                                actionLabel = "解析并预览",
+                                busy = busy,
+                                onAction = {
+                                    val input = pastedText
+                                    // 解析可能处理数 MB 文本，放进 IO 协程，避免阻塞主线程
+                                    scope.launch {
+                                        busy = true
+                                        errorMsg = null
+                                        val r = withContext(Dispatchers.IO) {
+                                            PlaylistParser.parse(input)
+                                        }
+                                        busy = false
+                                        if (r.isEmpty) {
+                                            errorMsg = "未解析到可用频道（识别格式：${r.format}）"
+                                        } else {
+                                            pendingSource = "粘贴导入"
+                                            pendingUrl = null
+                                            preview = r
+                                            step = ImportStep.Preview
+                                        }
+                                    }
+                                },
+                            )
+
+                            ImportStep.Url -> InputPage(
+                                hint = "https://example.com/list.m3u",
+                                text = urlText,
+                                onTextChange = { urlText = it },
+                                multiline = false,
+                                actionLabel = "拉取并预览",
+                                busy = busy,
+                                onAction = {
+                                    val url = urlText.trim()
+                                    if (!url.startsWith("http", ignoreCase = true)) {
+                                        errorMsg = "请输入以 http/https 开头的地址"
+                                    } else {
                                         scope.launch {
                                             busy = true
                                             errorMsg = null
-                                            val r = withContext(Dispatchers.IO) {
-                                                PlaylistParser.parse(input)
+                                            val fetched = vm.repo.fetch(url)
+                                            val bytes = fetched.getOrNull()
+                                            // 解码 + 解析是纯 CPU 操作，可能处理数 MB 文本，不能留在主线程
+                                            val parsed: Result<ParseResult> = if (bytes == null) {
+                                                Result.failure(
+                                                    fetched.exceptionOrNull()
+                                                        ?: IllegalStateException("拉取失败"),
+                                                )
+                                            } else {
+                                                runCatching {
+                                                    withContext(Dispatchers.IO) {
+                                                        PlaylistParser.parse(
+                                                            PlaylistParser.decodeAuto(bytes),
+                                                        )
+                                                    }
+                                                }
                                             }
                                             busy = false
-                                            if (r.isEmpty) {
-                                                errorMsg = "未解析到可用频道（识别格式：${r.format}）"
-                                            } else {
-                                                pendingSource = "粘贴导入"
-                                                pendingUrl = null
-                                                preview = r
-                                                step = ImportStep.Preview
-                                            }
-                                        }
-                                    },
-                                )
-
-                                ImportStep.Url -> InputPage(
-                                    hint = "https://example.com/list.m3u",
-                                    text = urlText,
-                                    onTextChange = { urlText = it },
-                                    multiline = false,
-                                    actionLabel = "拉取并预览",
-                                    busy = busy,
-                                    onAction = {
-                                        val url = urlText.trim()
-                                        if (!url.startsWith("http", ignoreCase = true)) {
-                                            errorMsg = "请输入以 http/https 开头的地址"
-                                        } else {
-                                            scope.launch {
-                                                busy = true
-                                                errorMsg = null
-                                                val fetched = vm.repo.fetch(url)
-                                                val bytes = fetched.getOrNull()
-                                                // 解码 + 解析是纯 CPU 操作，可能处理数 MB 文本，不能留在主线程
-                                                val parsed: Result<ParseResult> = if (bytes == null) {
-                                                    Result.failure(
-                                                        fetched.exceptionOrNull()
-                                                            ?: IllegalStateException("拉取失败"),
-                                                    )
-                                                } else {
-                                                    runCatching {
-                                                        withContext(Dispatchers.IO) {
-                                                            PlaylistParser.parse(
-                                                                PlaylistParser.decodeAuto(bytes),
-                                                            )
-                                                        }
+                                            parsed
+                                                .onSuccess { r ->
+                                                    if (r.isEmpty) {
+                                                        errorMsg = "未解析到可用频道（识别格式：${r.format}）"
+                                                    } else {
+                                                        name = name.ifBlank { "网络订阅" }
+                                                        pendingSource = "网络订阅"
+                                                        pendingUrl = url
+                                                        preview = r
+                                                        step = ImportStep.Preview
                                                     }
                                                 }
-                                                busy = false
-                                                parsed
-                                                    .onSuccess { r ->
-                                                        if (r.isEmpty) {
-                                                            errorMsg = "未解析到可用频道（识别格式：${r.format}）"
-                                                        } else {
-                                                            name = name.ifBlank { "网络订阅" }
-                                                            pendingSource = "网络订阅"
-                                                            pendingUrl = url
-                                                            preview = r
-                                                            step = ImportStep.Preview
-                                                        }
-                                                    }
-                                                    .onFailure { e ->
-                                                        errorMsg = "拉取失败：${e.message}"
-                                                    }
-                                            }
-                                        }
-                                    },
-                                )
-
-                                ImportStep.Preview -> {
-                                    val r = preview
-                                    if (r == null) {
-                                        // 极端情况（进程恢复后预览丢失）：只给返回入口，不在这里写状态
-                                        Text("预览已失效，请重新选择导入方式。")
-                                        FilledTonalButton(onClick = ::backToChoose) {
-                                            Text("重新选择")
-                                        }
-                                    } else {
-                                        PreviewPage(
-                                            name = name,
-                                            onNameChange = { name = it },
-                                            result = r,
-                                            onConfirm = {
-                                                // 先让页面滑走，再写库：避免订阅/设置/频道三个流
-                                                // 在动画第一帧同时刷新
-                                                close {
-                                                    vm.commitImport(name, pendingSource, r, pendingUrl)
+                                                .onFailure { e ->
+                                                    errorMsg = "拉取失败：${e.message}"
                                                 }
-                                            },
-                                        )
+                                        }
                                     }
+                                },
+                            )
+
+                            ImportStep.Preview -> {
+                                val r = preview
+                                if (r == null) {
+                                    // 极端情况（进程恢复后预览丢失）：只给返回入口，不在这里写状态
+                                    Text("预览已失效，请重新选择导入方式。")
+                                    FilledTonalButton(onClick = ::backToChoose) {
+                                        Text("重新选择")
+                                    }
+                                } else {
+                                    PreviewPage(
+                                        name = name,
+                                        onNameChange = { name = it },
+                                        result = r,
+                                        onConfirm = { kept ->
+                                            // 先让页面滑走，再写库：避免订阅/设置/频道三个流
+                                            // 在动画第一帧同时刷新
+                                            close {
+                                                vm.commitImport(name, pendingSource, kept, pendingUrl)
+                                            }
+                                        },
+                                    )
                                 }
                             }
                         }
                     }
 
-                    // 错误提示直接出现即可：为一个单行文字加淡入淡出，反而多一层动画与重排
+                    // 错误提示浮在底部：直接出现即可，不必为单行文字加淡入淡出
                     if (errorMsg != null) {
-                        Text(
-                            text = errorMsg.orEmpty(),
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                text = errorMsg.orEmpty(),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -485,87 +502,233 @@ private fun InputPage(
     busy: Boolean,
     onAction: () -> Unit,
 ) {
-    OutlinedTextField(
-        value = text,
-        onValueChange = onTextChange,
-        label = { Text(if (multiline) "播放列表内容" else "订阅地址") },
-        placeholder = { Text(hint) },
-        singleLine = !multiline,
-        minLines = if (multiline) 10 else 1,
-        maxLines = if (multiline) 16 else 1,
-        enabled = !busy,
-        modifier = Modifier.fillMaxWidth(),
-    )
-
-    Button(
-        onClick = onAction,
-        enabled = !busy && text.isNotBlank(),
-        modifier = Modifier.fillMaxWidth(),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (busy) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp))
-            Spacer(Modifier.size(8.dp))
-            Text("处理中…")
-        } else {
-            Text(actionLabel)
-        }
-    }
+        OutlinedTextField(
+            value = text,
+            onValueChange = onTextChange,
+            label = { Text(if (multiline) "播放列表内容" else "订阅地址") },
+            placeholder = { Text(hint) },
+            singleLine = !multiline,
+            minLines = if (multiline) 10 else 1,
+            maxLines = if (multiline) 16 else 1,
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        )
 
-    Text(
-        "支持 M3U / M3U8、TXT(#genre#)、JSON、卦象编码；自动识别 UA / Referer 请求头与 UTF-8 / GBK。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+        Button(
+            onClick = onAction,
+            enabled = !busy && text.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (busy) {
+                CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("处理中…")
+            } else {
+                Text(actionLabel)
+            }
+        }
+
+        Text(
+            "支持 M3U / M3U8、TXT(#genre#)、JSON、卦象编码；自动识别 UA / Referer 请求头与 UTF-8 / GBK。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
+/**
+ * 导入前的频道预览与**批量剔除**。
+ *
+ * - 默认全部保留（[kept] 初始为全部键）；点掉某个频道即标记为不导入。
+ * - 顶部搜索框按「频道名 / 分组」实时过滤；分组标题带勾选框，可整组一键保留/剔除。
+ * - 「全部剔除 / 全部保留 / 反选」做跨分组批量操作。
+ * - 勾选状态用 [keyOf] 作稳定键（tvg-id 常为空，用「名称 + 首个地址」避免滚动/搜索重排后错位）。
+ *   整页是内存态，关闭预览即丢弃，**不会**误改已保存的订阅。
+ */
 @Composable
 private fun PreviewPage(
     name: String,
     onNameChange: (String) -> Unit,
     result: ParseResult,
-    onConfirm: () -> Unit,
+    onConfirm: (List<Channel>) -> Unit,
 ) {
-    OutlinedTextField(
-        value = name,
-        onValueChange = onNameChange,
-        label = { Text("订阅名称") },
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-    )
-
-    Text(
-        "${result.format} · ${result.channels.size} 个频道 · ${result.groups.size} 个分组" +
-            (if (result.skipped > 0) " · 跳过 ${result.skipped} 行" else ""),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.primary,
-    )
-
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        result.channels.take(5).forEach { ch ->
-            ListItem(
-                headlineContent = { Text(ch.name, style = MaterialTheme.typography.bodyMedium) },
-                supportingContent = {
-                    Text(
-                        "${ch.group} · ${ch.urls.size} 个源",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                },
-                colors = ListItemDefaults.colors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                ),
-            )
-        }
-        if (result.channels.size > 5) {
-            Text(
-                "… 共 ${result.channels.size} 个频道",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
-            )
+    // (频道, 稳定键) 列表；键与 result 绑定，result 不变则不会重算
+    val rows = remember(result) {
+        result.channels.map { ch ->
+            ch to keyOf(ch)
         }
     }
+    val allKeys = remember(rows) { rows.map { it.second } }
 
-    Button(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) {
-        Text("确认导入 ${result.channels.size} 个频道")
+    var query by rememberSaveable { mutableStateOf("") }
+    // 默认全保留：初始为全部键。关掉某个 = 从 kept 移除
+    var kept by remember { mutableStateOf(allKeys.toSet()) }
+
+    // 搜索只影响展示，不改 kept 语义（keep 始终基于全量键）
+    val filtered = remember(rows, query) {
+        if (query.isBlank()) {
+            rows
+        } else {
+            rows.filter { (ch, _) ->
+                ch.name.contains(query, ignoreCase = true) ||
+                    ch.group.contains(query, ignoreCase = true)
+            }
+        }
+    }
+    val grouped = remember(filtered) { filtered.groupBy({ it.first.group }, { it }) }
+
+    val keptChannels = remember(rows, kept) {
+        rows.filter { it.second in kept }.map { it.first }
+    }
+    val excludedCount = allKeys.size - kept.size
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        OutlinedTextField(
+            value = name,
+            onValueChange = onNameChange,
+            label = { Text("订阅名称") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("搜索频道 / 分组") },
+            singleLine = true,
+            leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = null)
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        // 跨分组批量操作：剔除/保留/反选
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilledTonalButton(
+                onClick = { kept = emptySet() },
+                modifier = Modifier.weight(1f),
+            ) { Text("全部剔除") }
+            FilledTonalButton(
+                onClick = { kept = allKeys.toSet() },
+                modifier = Modifier.weight(1f),
+            ) { Text("全部保留") }
+            FilledTonalButton(
+                onClick = { kept = allKeys.minus(kept).toSet() },
+                modifier = Modifier.weight(1f),
+            ) { Text("反选") }
+        }
+
+        Text(
+            "将导入 ${kept.size} 个频道" +
+                (if (excludedCount > 0) " · 已排除 $excludedCount 个" else "") +
+                (if (result.skipped > 0) " · 跳过 ${result.skipped} 行" else ""),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            contentPadding = PaddingValues(vertical = 4.dp),
+        ) {
+            grouped.forEach { (group, list) ->
+                val groupKeys = list.map { it.second }
+                val keptInGroup = groupKeys.count { it in kept }
+                val allKept = keptInGroup == groupKeys.size
+                val noneKept = keptInGroup == 0
+
+                // 分组标题：整组一键保留/剔除（半选时显示不确定态）
+                item(key = "group:$group") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                kept = if (allKept) kept - groupKeys else kept + groupKeys
+                            }
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TriStateCheckbox(
+                            state = when {
+                                allKept -> ToggleableState.On
+                                noneKept -> ToggleableState.Off
+                                else -> ToggleableState.Indeterminate
+                            },
+                            onClick = {
+                                kept = if (allKept) kept - groupKeys else kept + groupKeys
+                            },
+                        )
+                        Text(
+                            group,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "$keptInGroup/${groupKeys.size}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                items(list, key = { it.second }) { (ch, key) ->
+                    val isKept = key in kept
+                    ListItem(
+                        headlineContent = {
+                            Text(ch.name, style = MaterialTheme.typography.bodyMedium)
+                        },
+                        supportingContent = {
+                            Text(
+                                "${ch.group} · ${ch.urls.size} 个源",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        },
+                        trailingContent = {
+                            Checkbox(
+                                checked = isKept,
+                                onCheckedChange = null,
+                            )
+                        },
+                        colors = ListItemDefaults.colors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                kept = if (isKept) kept - key else kept + key
+                            },
+                    )
+                }
+            }
+        }
+
+        Button(
+            onClick = { onConfirm(keptChannels) },
+            enabled = kept.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                if (kept.isEmpty()) "至少保留 1 个频道" else "确认导入 ${kept.size} 个频道",
+            )
+        }
     }
 }
+
+/**
+ * 频道稳定键：tvg-id 经常为空，同名频道可能跨分组，单用名称不足以区分；
+ * 用「名称 + NUL + 首个播放地址」既稳定又能区分同一名称的不同源。
+ */
+private fun keyOf(ch: Channel): String =
+    ch.name + "\u0000" + (ch.urls.firstOrNull() ?: "")
