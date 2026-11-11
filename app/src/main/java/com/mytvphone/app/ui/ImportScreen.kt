@@ -442,46 +442,54 @@ private fun ChoosePage(
     onPaste: () -> Unit,
     onUrl: () -> Unit,
 ) {
-    Text(
-        "本应用不内置任何频道，播放列表完全由你自己提供。",
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    // AnimatedContent 的内容作用域是 BoxScope，兄弟节点会默认叠在左上角同一点；
+    // 必须显式包一层 Column 才能纵向排列（InputPage/PreviewPage 已有，这里原来漏了）。
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "本应用不内置任何频道，播放列表完全由你自己提供。",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
-    if (busy) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp))
-            Spacer(Modifier.size(12.dp))
-            Text("正在读取…", style = MaterialTheme.typography.bodyMedium)
+        if (busy) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                Spacer(Modifier.size(12.dp))
+                Text("正在读取…", style = MaterialTheme.typography.bodyMedium)
+            }
+        } else {
+            ImportEntry(
+                icon = Icons.AutoMirrored.Filled.List,
+                title = "选择本地文件",
+                desc = "系统文件选择器 · M3U / M3U8 / TXT / JSON，自动识别 UTF-8 / GBK",
+                onClick = onFile,
+            )
+            ImportEntry(
+                icon = Icons.Default.Edit,
+                title = "粘贴文本",
+                desc = "直接粘贴 M3U 内容或「频道名,地址」",
+                onClick = onPaste,
+            )
+            ImportEntry(
+                icon = Icons.Default.Link,
+                title = "网络订阅 URL",
+                desc = "填一个地址，之后可在设置里一键刷新",
+                onClick = onUrl,
+            )
         }
-        return
+
+        Text(
+            "也可以在其他 App 里对 .m3u 文件点「分享」或「用其他应用打开」→ 选「口袋电视」。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
-
-    ImportEntry(
-        icon = Icons.AutoMirrored.Filled.List,
-        title = "选择本地文件",
-        desc = "系统文件选择器 · M3U / M3U8 / TXT / JSON，自动识别 UTF-8 / GBK",
-        onClick = onFile,
-    )
-    ImportEntry(
-        icon = Icons.Default.Edit,
-        title = "粘贴文本",
-        desc = "直接粘贴 M3U 内容或「频道名,地址」",
-        onClick = onPaste,
-    )
-    ImportEntry(
-        icon = Icons.Default.Link,
-        title = "网络订阅 URL",
-        desc = "填一个地址，之后可在设置里一键刷新",
-        onClick = onUrl,
-    )
-
-    Text(
-        "也可以在其他 App 里对 .m3u 文件点「分享」或「用其他应用打开」→ 选「口袋电视」。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 4.dp),
-    )
 }
 
 @Composable
